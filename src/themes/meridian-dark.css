@@ -40,7 +40,10 @@
 
   /* Status colors share the accent's chroma so they feel like one family. */
   --success: oklch(0.7 0.13 155);
-  --danger: oklch(0.66 0.18 25);
+  /* See meridian-light.css — hue shift (25 → 18) keeps danger distinct from
+     the crimson accent so destructive and primary actions don't collide. */
+  --danger: oklch(0.66 0.19 18);
+  --danger-fg: oklch(0.16 0.01 260);
   --warn: oklch(0.78 0.14 75);
 
   /* Flatter shadows — formal documents don't float. */

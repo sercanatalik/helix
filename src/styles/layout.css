@@ -13,6 +13,12 @@
 .app-shell[data-sidebar-collapsed="true"] {
   grid-template-columns: 52px 0px 1fr;
 }
+.app-shell[data-sidebar-collapsed="true"][data-panel-open="true"] {
+  grid-template-columns: 52px 0px 1fr 280px;
+}
+.app-shell[data-panel-open="true"] {
+  grid-template-columns: 52px 260px 1fr 280px;
+}
 .app-shell[data-sidebar-collapsed="true"] .chats-col {
   overflow: hidden;
   border-right-color: transparent;

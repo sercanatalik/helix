@@ -1,38 +1,53 @@
+import { useEffect, useRef } from "react";
 import { Markdown } from "../../components/markdown";
+import type { TranscriptMessage } from "../../app/types";
 
-const WELCOME = `Welcome to **Helix AI**. This is a layout-only scaffold — no LLM is wired
-up yet. The design is modular: change the active theme from \`Settings →
-Appearance\`.
+interface TranscriptProps {
+  readonly messages: readonly TranscriptMessage[];
+}
 
-Add a new theme by dropping a CSS file under \`src/themes/\` and registering
-it in \`src/themes/index.ts\`.
+export function Transcript({ messages }: TranscriptProps) {
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
-\`\`\`ts
-import "./meridian-light.css";
+  // Coalesce auto-scrolls into one per animation frame; streaming patches
+  // produce a new transcript reference on every chunk and synchronous
+  // scrollIntoView would force a layout per chunk.
+  useEffect(() => {
+    let frame: number | null = null;
+    frame = requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ block: "end" });
+    });
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [messages]);
 
-export const THEMES = [
-  { id: "meridian-light", label: "Meridian Light" },
-] as const;
-\`\`\`
-
-Inline math like $E = mc^2$ and a display block:
-
-$$\\int_0^\\infty e^{-x^2}\\,dx = \\tfrac{\\sqrt{\\pi}}{2}$$
-`;
-
-export function Transcript() {
   return (
     <section className="transcript scroll">
       <div className="transcript-inner">
-        <div className="msg">
-          <div className="msg-role" data-role="assistant">
-            assistant
-          </div>
-          <div className="msg-content">
-            <Markdown content={WELCOME} />
-          </div>
-        </div>
+        {messages.map((msg) => (
+          <MessageView key={msg.id} message={msg} />
+        ))}
+        <div ref={bottomRef} />
       </div>
     </section>
+  );
+}
+
+function MessageView({ message }: { readonly message: TranscriptMessage }) {
+  const streaming = message.status === "streaming";
+  return (
+    <div className="msg" data-status={message.status}>
+      <div className="msg-role" data-role={message.role}>
+        {message.role}
+      </div>
+      <div className="msg-content">
+        {message.role === "assistant" ? (
+          <Markdown content={message.content} streaming={streaming} />
+        ) : (
+          <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{message.content}</p>
+        )}
+      </div>
+    </div>
   );
 }

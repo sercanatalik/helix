@@ -17,6 +17,9 @@ tauri-build = { version = "2.4", features = [] }
 
 [dependencies]
 tauri = { version = "2.10", features = [] }
+tauri-plugin-http = "2"
+tauri-plugin-dialog = "2"
+notify = "6"
 
 tokio = { version = "1.48", features = ["sync", "rt-multi-thread", "macros"] }
 serde = { version = "1.0", features = ["derive"] }

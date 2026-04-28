@@ -14,13 +14,20 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-[var(--accent-raw)] text-[var(--accent-fg)] border border-transparent hover:opacity-90",
+          "bg-[var(--accent-raw)] text-[var(--accent-fg)] border border-transparent shadow-[inset_0_1px_0_oklch(1_0_0_/_0.1)] hover:bg-[oklch(from_var(--accent-raw)_calc(l-0.04)_c_h)]",
         outline:
           "border border-[var(--border-raw)] bg-[var(--bg-elev)] text-[var(--fg)] hover:border-[var(--accent-ring)] hover:bg-[var(--accent-soft)]",
         ghost:
           "text-[var(--fg-muted)] border border-transparent hover:bg-[var(--bg-elev)] hover:text-[var(--fg)]",
+        // Destructive — quiet at rest (red ink + red hairline border on neutral fill),
+        // saturates to solid danger on hover. Reads as dangerous only when reached
+        // for. Distinct hue from --accent-raw via the meridian theme tokens
+        // (--danger sits at hue 18; the brand accent at hue 25).
+        destructive:
+          "text-[var(--danger)] bg-[var(--bg-elev)] border border-[oklch(from_var(--danger)_l_c_h_/_0.4)] hover:bg-[var(--danger)] hover:text-[var(--danger-fg)] hover:border-[var(--danger)]",
+        // Legacy alias — kept so existing callers still work. Prefer `destructive`.
         danger:
-          "text-[var(--danger)] border border-transparent hover:bg-[oklch(from_var(--danger)_l_c_h_/_0.1)]",
+          "text-[var(--danger)] bg-[var(--bg-elev)] border border-[oklch(from_var(--danger)_l_c_h_/_0.4)] hover:bg-[var(--danger)] hover:text-[var(--danger-fg)] hover:border-[var(--danger)]",
         icon:
           "text-[var(--fg-muted)] border border-transparent hover:bg-[var(--bg-elev)] hover:text-[var(--fg)]",
       },

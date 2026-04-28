@@ -34,7 +34,11 @@
   --accent-ring: oklch(0.54 var(--accent-c) var(--accent-h) / 0.45);
 
   --success: oklch(0.5 0.13 155);
-  --danger: oklch(0.54 0.19 25);
+  /* Shifted danger from hue 25 → 18 so destructive actions read as a different
+     color from the crimson brand accent (which is also ~25). Without this the
+     Delete and Save buttons sit on top of each other in the palette. */
+  --danger: oklch(0.54 0.20 18);
+  --danger-fg: oklch(0.99 0 0);
   --warn: oklch(0.6 0.16 75);
 
   --shadow-sm: 0 1px 0 0 oklch(0 0 0 / 0.06);

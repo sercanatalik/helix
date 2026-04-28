@@ -1,10 +1,20 @@
-import type { AppView } from "./types";
+import type { AppView, WorkspaceId, WorkspaceRecord } from "./types";
 
 interface WorkspaceRailProps {
   readonly activeView: AppView;
   readonly collapsed: boolean;
   readonly onToggleCollapse: () => void;
   readonly onOpenSettings: () => void;
+  readonly workspaces: readonly WorkspaceRecord[];
+  readonly activeWorkspaceId: WorkspaceId | undefined;
+  readonly onSelectWorkspace: (id: WorkspaceId) => void;
+  readonly onAddWorkspace: () => void;
+  readonly onRemoveWorkspace: (id: WorkspaceId) => void;
+  /** Whether the right-side files panel toggle is meaningful (i.e. the
+   * active workspace has a folder attached). */
+  readonly canTogglePanel: boolean;
+  readonly panelOpen: boolean;
+  readonly onTogglePanel: () => void;
 }
 
 export function WorkspaceRail({
@@ -12,27 +22,42 @@ export function WorkspaceRail({
   collapsed,
   onToggleCollapse,
   onOpenSettings,
+  workspaces,
+  activeWorkspaceId,
+  onSelectWorkspace,
+  onAddWorkspace,
+  onRemoveWorkspace: _onRemoveWorkspace,
+  canTogglePanel,
+  panelOpen,
+  onTogglePanel,
 }: WorkspaceRailProps) {
   return (
     <aside className="rail">
       <div className="rail-drag" />
 
-      <button
-        type="button"
-        className="rail-btn"
-        data-active={activeView === "chat"}
-        title="Workspace"
-        aria-label="Workspace"
-      >
-        HX
-        <span className="rail-tooltip">Helix workspace</span>
-      </button>
+      {workspaces.map((ws) => (
+        <button
+          key={ws.id}
+          type="button"
+          className="rail-btn"
+          data-active={
+            activeView === "chat" && ws.id === activeWorkspaceId
+          }
+          title={ws.displayName}
+          aria-label={`Workspace ${ws.displayName}`}
+          onClick={() => onSelectWorkspace(ws.id)}
+        >
+          {initialsOf(ws.displayName)}
+          <span className="rail-tooltip">{ws.displayName}</span>
+        </button>
+      ))}
 
       <button
         type="button"
         className="rail-btn rail-btn-icon"
         title="Add workspace"
         aria-label="Add workspace"
+        onClick={onAddWorkspace}
       >
         <PlusIcon />
         <span className="rail-tooltip">Add workspace</span>
@@ -54,6 +79,22 @@ export function WorkspaceRail({
         </span>
       </button>
 
+      {canTogglePanel ? (
+        <button
+          type="button"
+          className="rail-btn rail-btn-icon"
+          data-active={panelOpen}
+          onClick={onTogglePanel}
+          title={panelOpen ? "Hide files panel" : "Show files panel"}
+          aria-label={panelOpen ? "Hide files panel" : "Show files panel"}
+        >
+          <PanelRightIcon />
+          <span className="rail-tooltip">
+            {panelOpen ? "Hide files" : "Show files"}
+          </span>
+        </button>
+      ) : null}
+
       <button
         type="button"
         className="rail-btn rail-btn-icon"
@@ -69,6 +110,18 @@ export function WorkspaceRail({
       </button>
     </aside>
   );
+}
+
+/** First letters of the first two words of the display name, uppercased.
+ * Falls back to the first two characters when there's only one word. */
+function initialsOf(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "??";
+  const words = trimmed.split(/\s+/);
+  if (words.length >= 2) {
+    return (words[0]![0]! + words[1]![0]!).toUpperCase();
+  }
+  return trimmed.slice(0, 2).toUpperCase();
 }
 
 // Tiny inline SVG icons — no lucide-react dependency in the scaffold.
@@ -104,6 +157,24 @@ function PanelLeftIcon() {
     >
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <path d="M9 3v18" />
+    </svg>
+  );
+}
+function PanelRightIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M15 3v18" />
     </svg>
   );
 }

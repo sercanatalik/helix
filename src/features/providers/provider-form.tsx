@@ -1,12 +1,106 @@
 import { useCallback, useMemo, useState } from "react";
+import { APIError } from "openai";
 import { KeyValueList } from "./key-value-list";
 import { Button } from "../../components/ui";
+import { buildExtraBody, createClient } from "../../lib/llm/client";
 import {
   AUTH_MODE_LABELS,
   type AuthMode,
   type ProviderAuth,
   type ProviderConfig,
 } from "./types";
+
+interface TestFailure {
+  readonly status?: number;
+  readonly statusText?: string;
+  readonly code?: string;
+  readonly type?: string;
+  readonly message: string;
+  /** Endpoint we attempted to reach — most useful info for connection errors. */
+  readonly requestUrl?: string;
+  /** Raw response body or serialized error cause, when one is available. */
+  readonly body?: unknown;
+}
+
+type TestState =
+  | { kind: "idle" }
+  | { kind: "testing" }
+  | { kind: "ok"; modelEcho?: string }
+  | ({ kind: "fail" } & TestFailure);
+
+function extractFailure(err: unknown, requestUrl?: string): TestFailure {
+  if (err instanceof APIError) {
+    const body = (err as { error?: unknown }).error;
+    const inner = isRecord(body) ? body : undefined;
+    const cause = (err as { cause?: unknown }).cause;
+    // For APIConnectionError there's no parsed response body — the only
+    // useful detail is the wrapped fetch error sitting in `cause`.
+    const detail = body !== undefined && body !== null ? body : cause;
+    return {
+      status: err.status,
+      code: typeof err.code === "string" ? err.code : undefined,
+      type: typeof err.type === "string" ? err.type : pickString(inner, "type"),
+      message: pickString(inner, "message") ?? err.message,
+      body: describeError(detail),
+      requestUrl,
+    };
+  }
+  if (err instanceof Error) {
+    return {
+      message: err.message,
+      body: describeError(err.cause),
+      requestUrl,
+    };
+  }
+  return { message: String(err), requestUrl };
+}
+
+/** Walk Error → plain-object so JSON.stringify produces something readable.
+ * Error instances have non-enumerable `name`/`message` and otherwise stringify
+ * to `{}`, which is why "Connection error" used to show up bare. */
+function describeError(value: unknown): unknown {
+  if (value === undefined || value === null) return undefined;
+  if (value instanceof Error) {
+    const e = value as Error & { code?: unknown };
+    const out: Record<string, unknown> = {
+      name: e.name,
+      message: e.message,
+    };
+    if (typeof e.code === "string") out.code = e.code;
+    if (e.cause !== undefined && e.cause !== e) {
+      const inner = describeError(e.cause);
+      if (inner !== undefined) out.cause = inner;
+    }
+    return out;
+  }
+  return value;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function pickString(
+  obj: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  if (!obj) return undefined;
+  const v = obj[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+function cleanDraft(draft: ProviderConfig): ProviderConfig {
+  const clean = (xs: readonly { key: string; value: string }[]) =>
+    xs.filter((p) => p.key.trim() !== "");
+  return {
+    ...draft,
+    name: draft.name.trim() || draft.name,
+    baseUrl: draft.baseUrl.trim(),
+    model: draft.model?.trim() || undefined,
+    extraHeaders: clean(draft.extraHeaders),
+    extraParams: clean(draft.extraParams),
+  };
+}
 
 interface ProviderFormProps {
   readonly initial: ProviderConfig;
@@ -70,20 +164,45 @@ export function ProviderForm({
 
   const canSave = useMemo(() => draft.name.trim().length > 0, [draft.name]);
 
+  const [testState, setTestState] = useState<TestState>({ kind: "idle" });
+  const isTesting = testState.kind === "testing";
+
+  const testConnection = useCallback(async () => {
+    const cleaned = cleanDraft(draft);
+    if (!cleaned.baseUrl) {
+      setTestState({ kind: "fail", message: "Set a base URL first." });
+      return;
+    }
+    if (!cleaned.model) {
+      setTestState({
+        kind: "fail",
+        message: "Set a default model to test against.",
+      });
+      return;
+    }
+    setTestState({ kind: "testing" });
+    try {
+      const client = createClient(cleaned);
+      const r = await client.chat.completions.create({
+        model: cleaned.model,
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 1,
+        stream: false,
+        ...buildExtraBody(cleaned),
+      });
+      setTestState({ kind: "ok", modelEcho: r.model });
+    } catch (err) {
+      setTestState({
+        kind: "fail",
+        ...extractFailure(err, cleaned.baseUrl),
+      });
+    }
+  }, [draft]);
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSave) return;
-    // Strip empty key/value rows to keep the persisted config tidy.
-    const clean = (xs: readonly { key: string; value: string }[]) =>
-      xs.filter((p) => p.key.trim() !== "");
-    onSave({
-      ...draft,
-      name: draft.name.trim(),
-      baseUrl: draft.baseUrl.trim(),
-      model: draft.model?.trim() || undefined,
-      extraHeaders: clean(draft.extraHeaders),
-      extraParams: clean(draft.extraParams),
-    });
+    onSave(cleanDraft({ ...draft, name: draft.name.trim() }));
   };
 
   return (
@@ -193,6 +312,30 @@ export function ProviderForm({
           addLabel="Add param"
         />
       </FieldGroup>
+
+      <div className="provider-test-row">
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          onClick={() => void testConnection()}
+          disabled={isTesting}
+        >
+          {isTesting ? "Testing…" : "Test connection"}
+        </Button>
+        {testState.kind === "ok" ? (
+          <span className="provider-test-result" data-state="ok">
+            Connected
+            {testState.modelEcho ? ` · ${testState.modelEcho}` : null}
+          </span>
+        ) : testState.kind === "fail" ? (
+          <TestFailureDetail failure={testState} />
+        ) : (
+          <span className="provider-test-hint">
+            Sends a 1-token chat completion to verify base URL, auth, and model.
+          </span>
+        )}
+      </div>
 
       <footer className="provider-form-actions">
         {onDelete ? (
@@ -384,4 +527,52 @@ function Field({
       {hint ? <span className="field-hint">{hint}</span> : null}
     </label>
   );
+}
+
+function TestFailureDetail({ failure }: { readonly failure: TestFailure }) {
+  const headBits: string[] = [];
+  if (failure.status !== undefined) headBits.push(String(failure.status));
+  if (failure.code) headBits.push(failure.code);
+  if (failure.type && failure.type !== failure.code) headBits.push(failure.type);
+  const head = headBits.join(" · ");
+
+  const bodyJson =
+    failure.body !== undefined ? safeStringify(failure.body) : null;
+
+  // Connection-style errors land here with no status/code/body — give them a
+  // contextual hint so the user has something actionable beyond the message.
+  const isConnectionError = !head && !bodyJson && /connection|fetch|network/i.test(failure.message);
+
+  return (
+    <div className="provider-test-result" data-state="fail">
+      {head ? <div className="provider-test-result-head">{head}</div> : null}
+      <div className="provider-test-result-message">{failure.message}</div>
+      {failure.requestUrl ? (
+        <div className="provider-test-result-meta">
+          → {failure.requestUrl}
+        </div>
+      ) : null}
+      {isConnectionError ? (
+        <div className="provider-test-result-hint">
+          The request never reached a server. Likely causes: wrong base URL,
+          provider unreachable, or the API doesn't allow browser CORS.
+        </div>
+      ) : null}
+      {bodyJson ? (
+        <details className="provider-test-result-body" open>
+          <summary>Details</summary>
+          <pre>{bodyJson}</pre>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function safeStringify(value: unknown): string | null {
+  try {
+    const out = JSON.stringify(value, null, 2);
+    return out && out !== "{}" && out !== "null" ? out : null;
+  } catch {
+    return null;
+  }
 }

@@ -14,11 +14,14 @@ export interface WorkspaceRecord {
 
 export type SessionStatus = "idle" | "running" | "failed";
 
+export type MessageStatus = "streaming" | "complete" | "error";
+
 export interface TranscriptMessage {
   readonly id: string;
   readonly role: "user" | "assistant" | "system";
   readonly content: string;
   readonly createdAt: Timestamp;
+  readonly status?: MessageStatus;
 }
 
 export interface SessionRecord {

@@ -28,6 +28,7 @@
 
   --success: oklch(0.55 0.13 150);
   --danger: oklch(0.55 0.19 25);
+  --danger-fg: oklch(0.99 0 0);
   --warn: oklch(0.62 0.16 75);
 
   --shadow-sm: 0 1px 2px 0 oklch(0 0 0 / 0.05);

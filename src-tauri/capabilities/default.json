@@ -8,6 +8,15 @@
     "core:window:default",
     "core:app:default",
     "core:event:default",
-    "core:path:default"
+    "core:path:default",
+    "dialog:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://*/**" },
+        { "url": "http://localhost:*/**" },
+        { "url": "http://127.0.0.1:*/**" }
+      ]
+    }
   ]
 }

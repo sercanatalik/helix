@@ -1,20 +1,45 @@
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { Button, Kbd } from "../../components/ui";
 
-export function Composer() {
+interface ComposerProps {
+  readonly onSend: (text: string) => void;
+  readonly disabled?: boolean;
+  readonly hint?: string;
+}
+
+export function Composer({ onSend, disabled = false, hint }: ComposerProps) {
   const [text, setText] = useState("");
-  const canSend = text.trim().length > 0;
+  const canSend = text.trim().length > 0 && !disabled;
+
+  function submit() {
+    if (!canSend) return;
+    onSend(text);
+    setText("");
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      submit();
+    }
+  }
 
   return (
     <div className="composer-wrap">
       <div className="composer-inner">
+        {hint ? <div className="composer-status">{hint}</div> : null}
         <div className="composer-card">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Message the assistant…"
+            onKeyDown={onKeyDown}
+            placeholder={
+              disabled
+                ? "Streaming…"
+                : "Message the assistant…"
+            }
             rows={1}
-            disabled
+            disabled={disabled}
           />
           <div className="composer-toolbar">
             <div className="composer-hint">
@@ -25,7 +50,7 @@ export function Composer() {
                 <Kbd>⇧</Kbd>+<Kbd>↵</Kbd> newline
               </span>
             </div>
-            <Button disabled={!canSend}>
+            <Button disabled={!canSend} onClick={submit}>
               Send
               <SendIcon />
             </Button>

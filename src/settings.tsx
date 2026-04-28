@@ -2,6 +2,9 @@ import { useState } from "react";
 import { useTheme } from "./hooks/use-theme";
 import { THEMES, type ThemeId } from "./themes";
 import { ProvidersPane } from "./components/providers-pane";
+import { Badge } from "./components/ui";
+import { cardSurface } from "./components/ui/card";
+import { cn } from "./lib/utils";
 
 type SettingsTab = "appearance" | "providers" | "general";
 
@@ -86,22 +89,30 @@ function ThemeCard({
   return (
     <button
       type="button"
-      className="theme-card"
-      data-active={active || undefined}
       data-theme-id={id}
-      onClick={onSelect}
       aria-pressed={active}
+      onClick={onSelect}
+      className={cn(
+        cardSurface,
+        "p-3.5 flex flex-col gap-2.5 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-elev-2)]",
+        active &&
+          "border-[var(--accent-raw)] bg-[var(--accent-soft)] shadow-[inset_0_0_0_1px_var(--accent-raw)] hover:bg-[var(--accent-soft)]",
+      )}
     >
-      <div className="theme-card-head">
-        <span className="theme-card-name">{label}</span>
-        {active ? <span className="theme-card-badge">active</span> : null}
+      <div className="flex items-center justify-between gap-2.5">
+        <span className="text-[13px] font-semibold text-[var(--fg)]">
+          {label}
+        </span>
+        {active ? <Badge>active</Badge> : null}
       </div>
-      <p className="theme-card-desc">{description}</p>
-      <div className="theme-swatches" aria-hidden>
+      <p className="text-[11.5px] text-[var(--fg-muted)] leading-[1.4] min-h-[32px] m-0">
+        {description}
+      </p>
+      <div className="flex gap-1" aria-hidden>
         {swatches.map((color, i) => (
           <span
             key={`${id}-${i}`}
-            className="theme-swatch"
+            className="w-5 h-5 rounded border border-[var(--border-subtle)]"
             style={{ background: color }}
           />
         ))}

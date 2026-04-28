@@ -8,6 +8,9 @@ import {
 } from "../providers/types";
 import { newProviderId } from "../providers/storage";
 import { ProviderForm } from "./provider-form";
+import { Badge, Button } from "./ui";
+import { cardSurface } from "./ui/card";
+import { cn } from "../lib/utils";
 
 type Mode =
   | { kind: "list" }
@@ -86,9 +89,7 @@ export function ProvidersPane() {
               >
                 <div className="provider-row-head">
                   <span className="provider-row-name">{p.name}</span>
-                  <span className="provider-row-badge">
-                    {AUTH_MODE_LABELS[p.auth.mode]}
-                  </span>
+                  <Badge>{AUTH_MODE_LABELS[p.auth.mode]}</Badge>
                 </div>
                 <div className="provider-row-meta">
                   <span className="provider-row-url">
@@ -103,14 +104,14 @@ export function ProvidersPane() {
                 </div>
               </button>
               <div className="provider-row-actions">
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => toggleEnabled(p.id)}
                   aria-pressed={p.enabled}
                 >
                   {p.enabled ? "Enabled" : "Disabled"}
-                </button>
+                </Button>
               </div>
             </li>
           ))}
@@ -123,7 +124,6 @@ export function ProvidersPane() {
           <li key={preset.id}>
             <button
               type="button"
-              className="preset-card"
               onClick={() =>
                 setMode({
                   kind: "edit",
@@ -131,9 +131,17 @@ export function ProvidersPane() {
                   isNew: true,
                 })
               }
+              className={cn(
+                cardSurface,
+                "w-full px-3 py-2.5 flex flex-col gap-1 text-left transition-colors hover:border-[var(--accent-ring)] hover:bg-[var(--accent-soft)]",
+              )}
             >
-              <span className="preset-card-name">{preset.name}</span>
-              <span className="preset-card-desc">{preset.description}</span>
+              <span className="text-[12.5px] font-semibold text-[var(--fg)]">
+                {preset.name}
+              </span>
+              <span className="text-[11px] text-[var(--fg-dim)] leading-[1.4]">
+                {preset.description}
+              </span>
             </button>
           </li>
         ))}

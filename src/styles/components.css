@@ -183,28 +183,6 @@
   flex: 1;
 }
 
-/* ---------- Titlebar icon button ---------- */
-.titlebar-icon-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius);
-  display: grid;
-  place-items: center;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--fg-muted);
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-.titlebar-icon-btn:hover {
-  background: var(--bg-elev);
-  color: var(--fg);
-}
-.titlebar-icon-btn[data-active="true"] {
-  background: var(--accent-soft);
-  color: var(--fg);
-  border-color: color-mix(in oklab, var(--accent-raw) 35%, transparent);
-}
-
 /* ---------- Transcript shell ---------- */
 .transcript {
   flex: 1;
@@ -312,23 +290,6 @@
   align-items: center;
   gap: 3px;
 }
-.composer-send {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: var(--radius);
-  font-size: 12px;
-  font-weight: 500;
-  background: var(--accent-raw);
-  color: var(--accent-fg);
-  border: 1px solid transparent;
-  transition: opacity 120ms ease;
-}
-.composer-send:disabled {
-  opacity: 0.5;
-}
-
 /* ---------- Empty state ---------- */
 .empty-state {
   flex: 1;
@@ -444,119 +405,6 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
-}
-.theme-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--border-raw);
-  background: var(--bg-elev);
-  border-radius: 10px;
-  text-align: left;
-  transition: border-color 120ms ease, background 120ms ease,
-    box-shadow 120ms ease;
-}
-.theme-card:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-elev-2);
-}
-.theme-card[data-active="true"] {
-  border-color: var(--accent-raw);
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 1px var(--accent-raw) inset;
-}
-.theme-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-.theme-card-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg);
-}
-.theme-card-badge {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--accent-raw);
-}
-.theme-card-desc {
-  font-size: 11.5px;
-  color: var(--fg-muted);
-  line-height: 1.4;
-  min-height: 32px;
-}
-.theme-swatches {
-  display: flex;
-  gap: 4px;
-}
-.theme-swatch {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  border: 1px solid var(--border-subtle);
-}
-
-/* ---------- Buttons (shared in settings forms) ---------- */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: var(--radius);
-  font-size: 12.5px;
-  font-weight: 500;
-  font-family: var(--font-sans);
-  border: 1px solid var(--border-raw);
-  background: var(--bg-elev);
-  color: var(--fg);
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease,
-    opacity 120ms ease;
-  white-space: nowrap;
-}
-.btn:hover:not(:disabled) {
-  background: var(--bg-elev-2);
-  border-color: var(--border-strong);
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.btn-primary {
-  background: var(--accent-raw);
-  color: var(--accent-fg);
-  border-color: transparent;
-}
-.btn-primary:hover:not(:disabled) {
-  background: var(--accent-raw);
-  filter: brightness(1.06);
-  border-color: transparent;
-}
-.btn-ghost {
-  background: transparent;
-  border-color: transparent;
-  color: var(--fg-muted);
-}
-.btn-ghost:hover:not(:disabled) {
-  background: var(--bg-elev);
-  color: var(--fg);
-  border-color: transparent;
-}
-.btn-danger {
-  color: var(--danger);
-}
-.btn-danger:hover:not(:disabled) {
-  background: oklch(from var(--danger) l c h / 0.1);
-  color: var(--danger);
-}
-.btn-sm {
-  padding: 4px 10px;
-  font-size: 11.5px;
 }
 
 /* ---------- Field primitives (settings forms) ---------- */
@@ -820,19 +668,6 @@
   text-overflow: ellipsis;
   min-width: 0;
 }
-.provider-row-badge {
-  flex-shrink: 0;
-  padding: 2px 7px;
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--accent-raw);
-  background: var(--accent-soft);
-  border: 1px solid color-mix(in oklab, var(--accent-raw) 25%, transparent);
-}
 .provider-row-meta {
   display: flex;
   align-items: center;
@@ -862,7 +697,7 @@
   flex-shrink: 0;
 }
 
-/* ---------- Preset grid ---------- */
+/* ---------- Preset grid (cards themselves wear cardSurface) ---------- */
 .preset-grid {
   list-style: none;
   padding: 0;
@@ -870,32 +705,6 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 8px;
-}
-.preset-card {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 11px 13px;
-  border: 1px solid var(--border-raw);
-  background: var(--bg-elev);
-  border-radius: 10px;
-  text-align: left;
-  transition: border-color 120ms ease, background 120ms ease;
-}
-.preset-card:hover {
-  border-color: var(--accent-ring);
-  background: var(--accent-soft);
-}
-.preset-card-name {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--fg);
-}
-.preset-card-desc {
-  font-size: 11px;
-  color: var(--fg-dim);
-  line-height: 1.4;
 }
 
 /* ---------- Provider form ---------- */

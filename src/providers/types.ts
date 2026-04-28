@@ -2,45 +2,39 @@
  *
  * A ProviderConfig fully describes how to call an LLM HTTP endpoint:
  * base URL, model, auth mode, and optional extra headers / body params.
- * Auth is a discriminated union so the consumer (HTTP client, etc.) can
- * branch cleanly per mode without ad-hoc null checks.
- */
+ * ProviderAuth is a discriminated union on `mode` so the consumer (HTTP
+ * client, etc.) can branch cleanly per mode without ad-hoc null checks. */
 
 export type ProviderId = string;
 
 export type AuthMode = "none" | "api_key_header" | "api_key_body" | "basic";
 
-export interface NoneAuth {
-  readonly mode: "none";
-}
-
-/** API key sent as an HTTP header. valueTemplate uses `{key}` as the
- * placeholder so callers can model both `Bearer {key}` and bare `{key}`. */
-export interface ApiKeyHeaderAuth {
-  readonly mode: "api_key_header";
-  readonly headerName: string;
-  readonly valueTemplate: string;
-  readonly apiKey: string;
-}
-
-/** API key sent inside the JSON request body under a configurable key. */
-export interface ApiKeyBodyAuth {
-  readonly mode: "api_key_body";
-  readonly bodyKey: string;
-  readonly apiKey: string;
-}
-
-export interface BasicAuth {
-  readonly mode: "basic";
-  readonly username: string;
-  readonly password: string;
-}
-
 export type ProviderAuth =
-  | NoneAuth
-  | ApiKeyHeaderAuth
-  | ApiKeyBodyAuth
-  | BasicAuth;
+  | { readonly mode: "none" }
+  /** API key sent as an HTTP header. valueTemplate uses `{key}` as the
+   * placeholder so callers can model both `Bearer {key}` and bare `{key}`. */
+  | {
+      readonly mode: "api_key_header";
+      readonly headerName: string;
+      readonly valueTemplate: string;
+      readonly apiKey: string;
+    }
+  /** API key sent inside the JSON request body under a configurable key. */
+  | {
+      readonly mode: "api_key_body";
+      readonly bodyKey: string;
+      readonly apiKey: string;
+    }
+  | {
+      readonly mode: "basic";
+      readonly username: string;
+      readonly password: string;
+    };
+
+export interface KeyValuePair {
+  readonly key: string;
+  readonly value: string;
+}
 
 export interface ProviderConfig {
   readonly id: ProviderId;
@@ -55,11 +49,6 @@ export interface ProviderConfig {
   readonly extraParams: readonly KeyValuePair[];
   readonly enabled: boolean;
   readonly createdAt: string;
-}
-
-export interface KeyValuePair {
-  readonly key: string;
-  readonly value: string;
 }
 
 export interface ProviderPreset {

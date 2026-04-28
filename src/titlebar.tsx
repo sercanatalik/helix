@@ -1,4 +1,5 @@
 import { BrandMark } from "./components/brand-mark";
+import { Button, Separator } from "./components/ui";
 
 interface TitlebarProps {
   readonly title: string;
@@ -10,7 +11,7 @@ export function Titlebar({ title, subtitle, onBack }: TitlebarProps) {
   return (
     <header className="titlebar">
       <BrandLogo />
-      <span className="titlebar-divider" aria-hidden />
+      <Separator orientation="vertical" />
       <div className="titlebar-drag">
         <span className="titlebar-title">{title}</span>
         {subtitle ? (
@@ -21,15 +22,15 @@ export function Titlebar({ title, subtitle, onBack }: TitlebarProps) {
         ) : null}
       </div>
       {onBack ? (
-        <button
-          type="button"
-          className="titlebar-icon-btn"
+        <Button
+          variant="icon"
+          size="icon"
           onClick={onBack}
           title="Back"
           aria-label="Back"
         >
           <BackIcon />
-        </button>
+        </Button>
       ) : null}
     </header>
   );
@@ -38,7 +39,7 @@ export function Titlebar({ title, subtitle, onBack }: TitlebarProps) {
 function BrandLogo() {
   return (
     <div className="brand" aria-label="Helix AI">
-      <BrandMark shape="hexagon" />
+      <BrandMark />
       <span className="brand-text">
         <span className="brand-title">
           <b>Helix</b> <span className="brand-sub-name">AI</span>

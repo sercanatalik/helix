@@ -196,13 +196,6 @@
   flex-shrink: 0;
   min-height: 56px;
 }
-.titlebar-divider {
-  width: 1px;
-  align-self: stretch;
-  margin: 6px 4px 6px 6px;
-  background: var(--border-subtle);
-  flex-shrink: 0;
-}
 .titlebar-drag {
   flex: 1;
   height: 30px;

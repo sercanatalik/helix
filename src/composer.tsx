@@ -1,9 +1,9 @@
 import { useState } from "react";
+import { Button, Kbd } from "./components/ui";
 
 export function Composer() {
   const [text, setText] = useState("");
-  const trimmed = text.trim();
-  const canSend = trimmed.length > 0;
+  const canSend = text.trim().length > 0;
 
   return (
     <div className="composer-wrap">
@@ -19,16 +19,16 @@ export function Composer() {
           <div className="composer-toolbar">
             <div className="composer-hint">
               <span>
-                <kbd>↵</kbd> send
+                <Kbd>↵</Kbd> send
               </span>
               <span>
-                <kbd>⇧</kbd>+<kbd>↵</kbd> newline
+                <Kbd>⇧</Kbd>+<Kbd>↵</Kbd> newline
               </span>
             </div>
-            <button type="button" className="composer-send" disabled={!canSend}>
+            <Button disabled={!canSend}>
               Send
               <SendIcon />
-            </button>
+            </Button>
           </div>
         </div>
       </div>

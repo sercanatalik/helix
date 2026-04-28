@@ -1,6 +1,8 @@
 /* helix-ai · stylesheet entrypoint.
- * Order: token contract → themes (set tokens) → base (consumes tokens)
- *        → layout (consumes tokens) → components (consumes tokens). */
+ * Order: tokens → themes → base reset → layout → components → tailwind utilities.
+ * Tailwind's preflight is disabled in tailwind.config.js, so base.css remains
+ * the authoritative reset. Tailwind utilities sit on top, reading the same
+ * CSS variables via arbitrary-value syntax (e.g. `bg-[var(--bg-elev)]`). */
 
 @import "./tokens.css";
 @import "../themes/dark.css";
@@ -10,3 +12,7 @@
 @import "./base.css";
 @import "./layout.css";
 @import "./components.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

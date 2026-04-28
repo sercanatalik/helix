@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { KeyValueList } from "./key-value-list";
+import { Button } from "./ui";
 import {
   AUTH_MODE_LABELS,
   type AuthMode,
@@ -195,21 +196,17 @@ export function ProviderForm({
 
       <footer className="provider-form-actions">
         {onDelete ? (
-          <button
-            type="button"
-            className="btn btn-ghost btn-danger"
-            onClick={onDelete}
-          >
+          <Button variant="danger" size="lg" onClick={onDelete}>
             Delete provider
-          </button>
+          </Button>
         ) : null}
         <span className="actions-spacer" />
-        <button type="button" className="btn btn-ghost" onClick={onCancel}>
+        <Button variant="ghost" size="lg" onClick={onCancel}>
           Cancel
-        </button>
-        <button type="submit" className="btn btn-primary" disabled={!canSave}>
+        </Button>
+        <Button type="submit" size="lg" disabled={!canSave}>
           Save
-        </button>
+        </Button>
       </footer>
     </form>
   );

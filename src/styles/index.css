@@ -4,6 +4,8 @@
  * the authoritative reset. Tailwind utilities sit on top, reading the same
  * CSS variables via arbitrary-value syntax (e.g. `bg-[var(--bg-elev)]`). */
 
+@import "katex/dist/katex.min.css";
+@import "streamdown/styles.css";
 @import "./tokens.css";
 @import "../themes/dark.css";
 @import "../themes/light.css";

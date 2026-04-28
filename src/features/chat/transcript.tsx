@@ -1,3 +1,25 @@
+import { Markdown } from "../../components/markdown";
+
+const WELCOME = `Welcome to **Helix AI**. This is a layout-only scaffold — no LLM is wired
+up yet. The design is modular: change the active theme from \`Settings →
+Appearance\`.
+
+Add a new theme by dropping a CSS file under \`src/themes/\` and registering
+it in \`src/themes/index.ts\`.
+
+\`\`\`ts
+import "./meridian-light.css";
+
+export const THEMES = [
+  { id: "meridian-light", label: "Meridian Light" },
+] as const;
+\`\`\`
+
+Inline math like $E = mc^2$ and a display block:
+
+$$\\int_0^\\infty e^{-x^2}\\,dx = \\tfrac{\\sqrt{\\pi}}{2}$$
+`;
+
 export function Transcript() {
   return (
     <section className="transcript scroll">
@@ -7,17 +29,7 @@ export function Transcript() {
             assistant
           </div>
           <div className="msg-content">
-            <p>
-              Welcome to <b>Helix AI</b>. This is a layout-only scaffold — no LLM
-              is wired up yet. The design is modular: change the active theme
-              from <kbd>Settings → Appearance</kbd>.
-            </p>
-            <p>
-              Add a new theme by dropping a CSS file under
-              <code> src/themes/ </code>
-              and registering it in
-              <code> src/themes/index.ts </code>.
-            </p>
+            <Markdown content={WELCOME} />
           </div>
         </div>
       </div>

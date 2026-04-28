@@ -1,6 +1,7 @@
 /* helix-ai · "light" theme — gcf-desktop light. */
 
 :root[data-theme="light"] {
+  color-scheme: light;
   --radius: 0.5rem;
   --accent-h: 135;
   --accent-c: 0.13;

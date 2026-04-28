@@ -4,7 +4,13 @@
 // the data-theme tokens stay authoritative — components read tokens via
 // arbitrary-value utilities like `bg-[var(--bg-elev)]`.
 export default {
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  content: [
+    "./index.html",
+    "./src/**/*.{ts,tsx}",
+    "./node_modules/streamdown/dist/**/*.{js,mjs}",
+    "./node_modules/@streamdown/code/dist/**/*.{js,mjs}",
+    "./node_modules/@streamdown/math/dist/**/*.{js,mjs}",
+  ],
   corePlugins: { preflight: false },
   theme: {
     extend: {

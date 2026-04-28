@@ -2,6 +2,7 @@
 
 :root,
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --radius: 0.5rem;
   --accent-h: 135;
   --accent-c: 0.13;

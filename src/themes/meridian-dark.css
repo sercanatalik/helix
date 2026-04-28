@@ -8,6 +8,7 @@
  */
 
 :root[data-theme="meridian-dark"] {
+  color-scheme: dark;
   --radius: 0.25rem; /* 4px — formal, ledger-like, not playful */
   --accent-h: 25;
   --accent-c: 0.18;

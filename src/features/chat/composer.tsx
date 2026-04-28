@@ -12,7 +12,7 @@ export function Composer() {
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Message the assistant.  (Backend not wired up yet.)"
+            placeholder="Message the assistant…"
             rows={1}
             disabled
           />

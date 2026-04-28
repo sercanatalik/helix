@@ -88,7 +88,7 @@
   color: var(--fg-dim);
   padding: 2px 6px;
   background: var(--bg);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
 }
 
@@ -741,4 +741,54 @@
 }
 .provider-form-actions .actions-spacer {
   flex: 1;
+}
+
+/* ---------- Streamdown markdown ----------
+ * Inline chips and the code-block header use --fg for text (AA-safe across
+ * themes) and reserve --accent-raw for the visual signals only: inline border,
+ * code-block left rule, header background tint. */
+.streamdown-content :not(pre) > code {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--accent-raw) 10%, var(--bg-elev));
+  border: 1px solid color-mix(in oklab, var(--accent-raw) 30%, transparent);
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.85em;
+}
+.streamdown-content pre,
+.streamdown-content [class*="code-block-body"] pre,
+.streamdown-content [class*="code-block"] {
+  border-left: 3px solid var(--accent-raw);
+  max-width: 100%;
+  overflow-x: auto;
+}
+.streamdown-content [class*="code-block-header"] {
+  background: color-mix(in oklab, var(--accent-raw) 6%, var(--bg-elev));
+  color: var(--fg);
+  font-size: 0.75rem;
+}
+.streamdown-content [class*="code-block-header"] [data-language] {
+  color: var(--fg-muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* Hover affordance for the copy/download icon buttons in the code header,
+ * which otherwise read as disabled at rest. */
+.streamdown-content [class*="code-block-header"] button:hover {
+  border: 1px solid var(--border-strong);
+  background: color-mix(in oklab, var(--accent-raw) 10%, var(--bg-elev-2));
+}
+
+/* Shiki dual-theme switch — @streamdown/code emits inline --shiki-light and
+ * --shiki-dark CSS vars on every token. By default Shiki shows the light
+ * variant; we explicitly flip to the dark variant under our dark themes. */
+:root[data-theme="dark"] .shiki,
+:root[data-theme="dark"] .shiki span,
+:root[data-theme="meridian-dark"] .shiki,
+:root[data-theme="meridian-dark"] .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
 }

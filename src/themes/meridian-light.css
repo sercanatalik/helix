@@ -6,6 +6,7 @@
  */
 
 :root[data-theme="meridian-light"] {
+  color-scheme: light;
   --radius: 0.25rem;
   --accent-h: 25;
   --accent-c: 0.18;

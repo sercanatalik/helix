@@ -1,0 +1,27 @@
+/* helix-ai · token contract.
+ *
+ * Every theme defines the same set of CSS custom properties on
+ * `:root[data-theme="<id>"]`. Components only consume these tokens — they
+ * never reference theme-specific values. To add a theme, add a new file under
+ * `src/themes/<id>.css`, register it in `src/themes/index.ts`, and set the
+ * full set of tokens listed below.
+ *
+ * Required tokens:
+ *   --radius
+ *   --accent-h, --accent-c           (oklch hue + chroma knobs)
+ *   --bg, --bg-elev, --bg-elev-2, --bg-sidebar, --bg-rail
+ *   --border-raw, --border-strong, --border-subtle
+ *   --fg, --fg-muted, --fg-dim, --fg-faint
+ *   --accent-raw, --accent-fg, --accent-soft, --accent-ring
+ *   --success, --danger, --warn
+ *   --shadow-sm, --shadow-md, --shadow-lg
+ *   --font-sans, --font-mono
+ */
+
+:root {
+  --font-sans:
+    "Inter Tight", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}

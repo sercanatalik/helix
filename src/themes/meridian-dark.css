@@ -1,0 +1,53 @@
+/* helix-ai · "meridian-dark" theme.
+ *
+ * Inspired by the structural confidence of corporate banking interfaces —
+ * deep cool navy as the "trust" surface, crisp 1px hairlines, and a single
+ * restrained crimson accent that does ALL the lifting (brand mark, rail
+ * indicator, primary action). Original color set; no third-party brand
+ * elements are referenced.
+ */
+
+:root[data-theme="meridian-dark"] {
+  --radius: 0.25rem; /* 4px — formal, ledger-like, not playful */
+  --accent-h: 25;
+  --accent-c: 0.18;
+
+  /* Cool deep navy foundation. Hue 255 keeps it from going purple; very low
+     chroma so it reads as "near-black with cool intent" rather than blue. */
+  --bg: oklch(0.18 0.018 255);
+  --bg-elev: oklch(0.215 0.02 255);
+  --bg-elev-2: oklch(0.255 0.022 255);
+  --bg-sidebar: oklch(0.16 0.018 255);
+  --bg-rail: oklch(0.13 0.015 255);
+
+  /* Hairlines are slightly cooler than surfaces — crisp, not fuzzy. */
+  --border-raw: oklch(0.32 0.018 255);
+  --border-strong: oklch(0.42 0.02 255);
+  --border-subtle: oklch(0.26 0.018 255);
+
+  /* Foreground reads as "paper white" against the navy — barely warm. */
+  --fg: oklch(0.965 0.004 95);
+  --fg-muted: oklch(0.78 0.008 95);
+  --fg-dim: oklch(0.6 0.01 255);
+  --fg-faint: oklch(0.46 0.012 255);
+
+  /* The single accent — crimson, used sparingly. */
+  --accent-raw: oklch(0.62 var(--accent-c) var(--accent-h));
+  --accent-fg: oklch(0.985 0.005 95);
+  --accent-soft: oklch(0.62 var(--accent-c) var(--accent-h) / 0.16);
+  --accent-ring: oklch(0.62 var(--accent-c) var(--accent-h) / 0.45);
+
+  /* Status colors share the accent's chroma so they feel like one family. */
+  --success: oklch(0.7 0.13 155);
+  --danger: oklch(0.66 0.18 25);
+  --warn: oklch(0.78 0.14 75);
+
+  /* Flatter shadows — formal documents don't float. */
+  --shadow-sm: 0 1px 0 0 oklch(0 0 0 / 0.35);
+  --shadow-md:
+    0 1px 0 0 oklch(0 0 0 / 0.35),
+    0 4px 12px -6px oklch(0 0 0 / 0.55);
+  --shadow-lg:
+    0 1px 0 0 oklch(0 0 0 / 0.4),
+    0 18px 40px -16px oklch(0 0 0 / 0.7);
+}

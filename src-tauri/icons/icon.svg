@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- Helix hexagon brand mark, baked in Meridian crimson.
+       Mirrors src/components/brand-mark.tsx <MarkHexagon filled />. -->
+  <g fill="none" stroke="#cc4f3e" stroke-width="1.6"
+     stroke-linejoin="round" stroke-linecap="round">
+    <path d="M12 2 L21 7 L21 17 L12 22 L3 17 L3 7 Z"
+          fill="#cc4f3e" fill-opacity="0.14" />
+    <path d="M12 2 L21 7 L21 17 L12 22 L3 17 L3 7 Z" />
+    <path d="M9 9 L15 15" opacity="0.7" />
+  </g>
+</svg>

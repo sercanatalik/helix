@@ -1,0 +1,46 @@
+/* helix-ai · "meridian-light" theme.
+ *
+ * The light counterpart to meridian-dark — paper-cool off-white surfaces,
+ * deep navy text (not pure black), and the same single crimson accent.
+ * Built for the same "ledger / annual report" formality, but in daylight.
+ */
+
+:root[data-theme="meridian-light"] {
+  --radius: 0.25rem;
+  --accent-h: 25;
+  --accent-c: 0.18;
+
+  /* Paper, slightly cool. Avoids the warm cream of the default light. */
+  --bg: oklch(0.985 0.004 250);
+  --bg-elev: oklch(1 0 0);
+  --bg-elev-2: oklch(0.96 0.005 250);
+  --bg-sidebar: oklch(0.965 0.005 250);
+  --bg-rail: oklch(0.945 0.006 250);
+
+  --border-raw: oklch(0.86 0.008 250);
+  --border-strong: oklch(0.74 0.01 250);
+  --border-subtle: oklch(0.92 0.006 250);
+
+  /* Foreground = deep navy, not black. Reads as "ink on paper". */
+  --fg: oklch(0.22 0.025 255);
+  --fg-muted: oklch(0.42 0.02 255);
+  --fg-dim: oklch(0.56 0.018 255);
+  --fg-faint: oklch(0.7 0.012 255);
+
+  --accent-raw: oklch(0.54 var(--accent-c) var(--accent-h));
+  --accent-fg: oklch(0.99 0.005 95);
+  --accent-soft: oklch(0.54 var(--accent-c) var(--accent-h) / 0.1);
+  --accent-ring: oklch(0.54 var(--accent-c) var(--accent-h) / 0.45);
+
+  --success: oklch(0.5 0.13 155);
+  --danger: oklch(0.54 0.19 25);
+  --warn: oklch(0.6 0.16 75);
+
+  --shadow-sm: 0 1px 0 0 oklch(0 0 0 / 0.06);
+  --shadow-md:
+    0 1px 0 0 oklch(0 0 0 / 0.05),
+    0 4px 12px -6px oklch(0 0 0 / 0.1);
+  --shadow-lg:
+    0 1px 0 0 oklch(0 0 0 / 0.06),
+    0 18px 40px -16px oklch(0 0 0 / 0.18);
+}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Kbd } from "./components/ui";
+import { Button, Kbd } from "../../components/ui";
 
 export function Composer() {
   const [text, setText] = useState("");

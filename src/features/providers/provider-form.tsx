@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
 import { KeyValueList } from "./key-value-list";
-import { Button } from "./ui";
+import { Button } from "../../components/ui";
 import {
   AUTH_MODE_LABELS,
   type AuthMode,
   type ProviderAuth,
   type ProviderConfig,
-} from "../providers/types";
+} from "./types";
 
 interface ProviderFormProps {
   readonly initial: ProviderConfig;

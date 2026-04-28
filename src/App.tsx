@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { WorkspaceRail } from "./workspace-rail";
-import { Sidebar } from "./sidebar";
-import { Titlebar } from "./titlebar";
-import { Transcript } from "./transcript";
-import { Composer } from "./composer";
-import { Settings } from "./settings";
-import { createEmptyState, type DesktopAppState } from "./types";
+import { WorkspaceRail } from "./app/workspace-rail";
+import { Sidebar } from "./app/sidebar";
+import { Titlebar } from "./app/titlebar";
+import { createEmptyState, type DesktopAppState } from "./app/types";
+import { Composer, Transcript } from "./features/chat";
+import { Settings } from "./features/settings";
 
 export function App() {
   const [state, setState] = useState<DesktopAppState>(createEmptyState());

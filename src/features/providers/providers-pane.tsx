@@ -1,16 +1,16 @@
 import { useMemo, useState } from "react";
-import { useProviders } from "../hooks/use-providers";
-import { PROVIDER_PRESETS, findPreset } from "../providers/presets";
+import { useProviders } from "./use-providers";
+import { PROVIDER_PRESETS, findPreset } from "./presets";
 import {
   AUTH_MODE_LABELS,
   type ProviderConfig,
   type ProviderPreset,
-} from "../providers/types";
-import { newProviderId } from "../providers/storage";
+} from "./types";
+import { newProviderId } from "./storage";
 import { ProviderForm } from "./provider-form";
-import { Badge, Button } from "./ui";
-import { cardSurface } from "./ui/card";
-import { cn } from "../lib/utils";
+import { Badge, Button } from "../../components/ui";
+import { cardSurface } from "../../components/ui/card";
+import { cn } from "../../lib/utils";
 
 type Mode =
   | { kind: "list" }

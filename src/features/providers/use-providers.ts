@@ -3,8 +3,8 @@ import {
   loadProviders,
   newProviderId,
   saveProviders,
-} from "../providers/storage";
-import type { ProviderConfig, ProviderId } from "../providers/types";
+} from "./storage";
+import type { ProviderConfig, ProviderId } from "./types";
 
 export interface UseProvidersResult {
   readonly providers: readonly ProviderConfig[];

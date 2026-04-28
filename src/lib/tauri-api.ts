@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppView, DesktopAppState } from "../types";
+import type { AppView, DesktopAppState } from "../app/types";
 import type { ThemeId } from "../themes";
 
 export const helixApi = {

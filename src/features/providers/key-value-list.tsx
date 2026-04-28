@@ -1,4 +1,4 @@
-import type { KeyValuePair } from "../providers/types";
+import type { KeyValuePair } from "./types";
 
 interface KeyValueListProps {
   readonly pairs: readonly KeyValuePair[];

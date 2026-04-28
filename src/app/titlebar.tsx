@@ -1,5 +1,5 @@
-import { BrandMark } from "./components/brand-mark";
-import { Button, Separator } from "./components/ui";
+import { BrandMark } from "./brand-mark";
+import { Button, Separator } from "../components/ui";
 
 interface TitlebarProps {
   readonly title: string;

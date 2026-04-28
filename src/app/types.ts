@@ -1,4 +1,4 @@
-import type { ThemeId } from "./themes";
+import type { ThemeId } from "../themes";
 
 export type WorkspaceId = string;
 export type SessionId = string;

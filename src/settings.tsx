@@ -1,33 +1,41 @@
 import { useState } from "react";
 import { useTheme } from "./hooks/use-theme";
 import { THEMES, type ThemeId } from "./themes";
+import { ProvidersPane } from "./components/providers-pane";
 
-type SettingsTab = "appearance" | "general";
+type SettingsTab = "appearance" | "providers" | "general";
+
+const TABS: ReadonlyArray<{ id: SettingsTab; label: string }> = [
+  { id: "appearance", label: "Appearance" },
+  { id: "providers", label: "Providers" },
+  { id: "general", label: "General" },
+];
 
 export function Settings() {
   const [tab, setTab] = useState<SettingsTab>("appearance");
   return (
     <div className="settings-layout">
       <nav className="settings-nav">
-        <button
-          type="button"
-          className="settings-nav-item"
-          data-active={tab === "appearance"}
-          onClick={() => setTab("appearance")}
-        >
-          Appearance
-        </button>
-        <button
-          type="button"
-          className="settings-nav-item"
-          data-active={tab === "general"}
-          onClick={() => setTab("general")}
-        >
-          General
-        </button>
+        {TABS.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            className="settings-nav-item"
+            data-active={tab === id}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
       </nav>
       <div className="settings-pane scroll">
-        {tab === "appearance" ? <AppearancePane /> : <GeneralPane />}
+        {tab === "appearance" ? (
+          <AppearancePane />
+        ) : tab === "providers" ? (
+          <ProvidersPane />
+        ) : (
+          <GeneralPane />
+        )}
       </div>
     </div>
   );
@@ -107,8 +115,8 @@ function GeneralPane() {
     <section>
       <h2 className="settings-section-title">General</h2>
       <p className="settings-section-desc">
-        Backend and integration settings will live here once the LLM and MCP
-        layers are wired up.
+        Backend and integration settings will live here once the MCP layer is
+        wired up.
       </p>
     </section>
   );

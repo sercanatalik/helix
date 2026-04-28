@@ -130,9 +130,20 @@
 .workspace-title {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
   padding: 0 4px 2px;
+}
+.workspace-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--fg);
+}
+.workspace-title-row svg {
+  color: var(--accent-raw);
+  flex-shrink: 0;
 }
 .workspace-title-name {
   font-size: 12.5px;
@@ -142,6 +153,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 .workspace-title-path {
   font-size: 10.5px;
@@ -150,6 +162,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-left: 18px;
+  direction: rtl;
+  text-align: left;
 }
 
 .chats-scroll {

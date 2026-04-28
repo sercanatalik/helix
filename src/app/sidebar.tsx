@@ -1,9 +1,14 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useProviders } from "../features/providers";
 import { useConnectionStatus } from "../hooks/use-connection-status";
-import type { SessionId, SessionRecord } from "./types";
+import type {
+  SessionId,
+  SessionRecord,
+  WorkspaceRecord,
+} from "./types";
 
 interface SidebarProps {
+  readonly workspace: WorkspaceRecord | undefined;
   readonly sessions: readonly SessionRecord[];
   readonly activeId: SessionId | undefined;
   readonly onSelect: (id: SessionId) => void;
@@ -12,6 +17,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  workspace,
   sessions,
   activeId,
   onSelect,
@@ -20,8 +26,40 @@ export function Sidebar({
 }: SidebarProps) {
   const { activeProvider } = useProviders();
   const conn = useConnectionStatus(activeProvider);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement | null>(null);
 
-  const groups = useMemo(() => groupSessions(sessions), [sessions]);
+  // `/` focuses the search input — gcf-desktop pattern. Skip when the user is
+  // already typing in another input/textarea so we don't steal focus mid-prose.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "/") return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const filteredSessions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((s) => {
+      if (s.title.toLowerCase().includes(q)) return true;
+      const last = s.transcript[s.transcript.length - 1];
+      if (last && last.content.toLowerCase().includes(q)) return true;
+      return false;
+    });
+  }, [sessions, query]);
+
+  const groups = useMemo(
+    () => groupSessions(filteredSessions),
+    [filteredSessions],
+  );
 
   const status =
     conn.status === "ok"
@@ -49,8 +87,15 @@ export function Sidebar({
       <div className="chats-col-drag" />
       <div className="chats-header">
         <div className="workspace-title">
-          <span className="workspace-title-name">helix-ai</span>
-          <span className="workspace-title-path">scaffold workspace</span>
+          <div className="workspace-title-row">
+            <FolderIcon />
+            <span className="workspace-title-name">
+              {workspace?.displayName ?? "helix-ai"}
+            </span>
+          </div>
+          <span className="workspace-title-path" title={workspace?.path || undefined}>
+            {workspace?.path || "scaffold workspace"}
+          </span>
         </div>
         <button
           type="button"
@@ -62,6 +107,20 @@ export function Sidebar({
           <span>New conversation</span>
           <span className="new-conv-kbd">⌘N</span>
         </button>
+        <div className="chat-search">
+          <SearchIcon />
+          <input
+            ref={searchRef}
+            type="text"
+            placeholder="Search chats"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+          />
+          {!query ? <span className="chat-search-kbd">/</span> : null}
+        </div>
       </div>
 
       <div className="chats-scroll scroll">
@@ -205,6 +264,43 @@ function PlusIcon() {
       aria-hidden
     >
       <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
     </svg>
   );
 }

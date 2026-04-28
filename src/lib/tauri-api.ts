@@ -7,6 +7,8 @@ export interface TreeEntry {
   readonly name: string;
   readonly kind: "folder" | "file";
   readonly depth: number;
+  /** File size in bytes; undefined for folders. */
+  readonly size?: number;
 }
 
 export const helixApi = {

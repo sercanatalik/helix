@@ -102,6 +102,7 @@ export function App() {
         onTogglePanel={() => setPanelOpen((v) => !v)}
       />
       <Sidebar
+        workspace={workspacesApi.activeWorkspace}
         sessions={sessionsApi.sessions}
         activeId={sessionsApi.activeId}
         onSelect={sessionsApi.setActive}
@@ -138,7 +139,10 @@ export function App() {
         )}
       </main>
       {showPanel && workspacesApi.activeWorkspace ? (
-        <WorkspacePanel workspace={workspacesApi.activeWorkspace} />
+        <WorkspacePanel
+          workspace={workspacesApi.activeWorkspace}
+          onClose={() => setPanelOpen(false)}
+        />
       ) : null}
       {isAddingWorkspace ? (
         <AddWorkspaceDialog
@@ -213,6 +217,7 @@ function ChatView({
         onSend={(text) => void send(text)}
         disabled={isStreaming || !activeProvider || !activeProvider.model}
         hint={hint}
+        modelLabel={activeProvider?.model}
       />
     </>
   );
@@ -235,8 +240,8 @@ function EmptyChat({ workspaceName }: EmptyChatProps) {
           </div>
           <h2 className="empty-chat-title">New chat</h2>
           <p className="empty-chat-desc">
-            Start a new conversation {where}. Type below and press{" "}
-            <kbd>↵</kbd> to send.
+            Send a message to start a conversation {where}. Type{" "}
+            <kbd>/</kbd> to invoke a skill, or just press <kbd>↵</kbd> to send.
           </p>
         </div>
       </div>

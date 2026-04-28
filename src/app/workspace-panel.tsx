@@ -5,6 +5,7 @@ import type { WorkspaceRecord } from "./types";
 
 interface WorkspacePanelProps {
   readonly workspace: WorkspaceRecord;
+  readonly onClose?: () => void;
 }
 
 type LoadState =
@@ -13,7 +14,7 @@ type LoadState =
   | { kind: "ok"; entries: readonly TreeEntry[] }
   | { kind: "error"; message: string };
 
-export function WorkspacePanel({ workspace }: WorkspacePanelProps) {
+export function WorkspacePanel({ workspace, onClose }: WorkspacePanelProps) {
   const [load, setLoad] = useState<LoadState>({ kind: "idle" });
   // Local expand/collapse state, keyed by folder path. Defaults to "open" for
   // the root level (depth 0) so the user sees something on first paint.
@@ -101,13 +102,48 @@ export function WorkspacePanel({ workspace }: WorkspacePanelProps) {
     }));
   }
 
+  function refresh() {
+    if (!workspace.path) return;
+    void (async () => {
+      const result = await fetchTree(workspace.path);
+      if (result.ok) setLoad({ kind: "ok", entries: result.entries });
+      else setLoad({ kind: "error", message: result.message });
+    })();
+  }
+
   return (
     <aside className="panel">
       <div className="panel-header">
-        <span className="panel-title">{workspace.displayName}</span>
-        <span className="panel-path" title={workspace.path}>
-          {workspace.path}
-        </span>
+        <div className="panel-header-row">
+          <span className="panel-label">Workspace</span>
+          <span className="panel-header-spacer" />
+          <button
+            type="button"
+            className="panel-icon-btn"
+            onClick={refresh}
+            title="Refresh"
+            aria-label="Refresh"
+          >
+            <RefreshIcon />
+          </button>
+          {onClose ? (
+            <button
+              type="button"
+              className="panel-icon-btn"
+              onClick={onClose}
+              title="Hide files panel"
+              aria-label="Hide files panel"
+            >
+              <CloseIcon />
+            </button>
+          ) : null}
+        </div>
+        <div className="panel-header-row">
+          <span className="panel-crumb" title={workspace.path}>
+            <FolderIcon />
+            <span>{workspace.displayName}</span>
+          </span>
+        </div>
       </div>
       <div className="panel-scroll scroll">
         {load.kind === "loading" ? (
@@ -135,6 +171,14 @@ export function WorkspacePanel({ workspace }: WorkspacePanelProps) {
   );
 }
 
+function formatSize(bytes: number | undefined): string {
+  if (bytes === undefined) return "";
+  if (bytes < 1024) return `${bytes}b`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)}k`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)}G`;
+}
+
 interface TreeRowProps {
   readonly entry: TreeEntry;
   readonly expanded: boolean;
@@ -143,6 +187,7 @@ interface TreeRowProps {
 
 function TreeRow({ entry, expanded, onToggle }: TreeRowProps) {
   const isFolder = entry.kind === "folder";
+  const size = formatSize(entry.size);
   return (
     <button
       type="button"
@@ -158,6 +203,7 @@ function TreeRow({ entry, expanded, onToggle }: TreeRowProps) {
         )}
       </span>
       <span className="tree-row-name">{entry.name}</span>
+      {size ? <span className="tree-row-meta">{size}</span> : null}
     </button>
   );
 }
@@ -213,6 +259,63 @@ function FileIcon() {
     >
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
       <path d="M14 2v6h6" />
+    </svg>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+      <path d="M3 21v-5h5" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M18 6 6 18M6 6l12 12" />
     </svg>
   );
 }

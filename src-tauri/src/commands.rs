@@ -48,6 +48,9 @@ pub struct TreeEntry {
     pub kind: &'static str,
     /// 0 for direct children of the workspace root, 1 for grandchildren, …
     pub depth: u32,
+    /// File size in bytes; absent for folders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
 }
 
 const MAX_DEPTH: u32 = 4;
@@ -116,6 +119,7 @@ fn walk_dir(dir: &Path, depth: u32, out: &mut Vec<TreeEntry>) {
             name,
             kind: "folder",
             depth,
+            size: None,
         });
         walk_dir(&path, depth + 1, out);
     }
@@ -123,11 +127,13 @@ fn walk_dir(dir: &Path, depth: u32, out: &mut Vec<TreeEntry>) {
         if out.len() >= MAX_ENTRIES {
             return;
         }
+        let size = std::fs::metadata(&path).ok().map(|m| m.len());
         out.push(TreeEntry {
             path: path.to_string_lossy().to_string(),
             name,
             kind: "file",
             depth,
+            size,
         });
     }
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type OpenAI from "openai";
 import { buildExtraBody, createClient } from "../lib/llm/client";
 import type { ProviderConfig } from "../features/providers";
-import type { TranscriptMessage } from "../app/types";
+import type { ToolCallRecord, TranscriptMessage } from "../app/types";
 
 type ChatMessageParam = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 type ChatTool = OpenAI.Chat.Completions.ChatCompletionTool;
@@ -138,6 +138,71 @@ interface AccumulatedToolCall {
   arguments: string;
 }
 
+/** Pull every fenced ```vega-lite / vegalite / vega block (including the
+ * fences) out of `text`. The transcript markdown plugin already maps these
+ * languages to <VegaChart>; salvaging them from tool output means a chart
+ * still renders even when the model decides to summarise the spec instead
+ * of echoing it verbatim. */
+const VEGA_BLOCK_RE = /```(?:vega-lite|vegalite|vega)\b[^\n]*\n[\s\S]*?\n```/g;
+function extractVegaBlocks(text: string): string[] {
+  if (!text || !text.includes("```")) return [];
+  const out: string[] = [];
+  let match: RegExpExecArray | null;
+  // Reset state in case the regex (with /g) was used before.
+  VEGA_BLOCK_RE.lastIndex = 0;
+  while ((match = VEGA_BLOCK_RE.exec(text)) !== null) {
+    out.push(match[0]);
+  }
+  return out;
+}
+
+/** Resolve and execute one tool call. Centralised so the agent loop above
+ * doesn't have to thread the three failure paths (unknown tool, malformed
+ * args, transport error) through nested branches. */
+async function runToolCall(
+  binding: McpToolBinding | undefined,
+  rawName: string,
+  rawArgs: string,
+): Promise<{ result: string; isError: boolean }> {
+  if (!binding) {
+    return {
+      result: `Tool "${rawName}" is not addressable from helix.`,
+      isError: true,
+    };
+  }
+  let args: Record<string, unknown>;
+  try {
+    args = rawArgs ? JSON.parse(rawArgs) : {};
+  } catch (parseErr) {
+    return {
+      result: `Could not parse tool arguments: ${
+        parseErr instanceof Error ? parseErr.message : String(parseErr)
+      }`,
+      isError: true,
+    };
+  }
+  try {
+    const result = await window.helixApi.callMcpTool(
+      binding.serverId,
+      binding.toolName,
+      args,
+    );
+    return {
+      result: result.isError
+        ? `Tool error: ${result.content}`
+        : result.content,
+      isError: result.isError,
+    };
+  } catch (callErr) {
+    return {
+      result: `Tool call failed: ${
+        callErr instanceof Error ? callErr.message : String(callErr)
+      }`,
+      isError: true,
+    };
+  }
+}
+
 /** Controlled chat hook — the caller owns `messages` (e.g. via useSessions),
  * we just emit updates through `onMessagesChange`. Streaming chunks land in
  * the caller's store on every patch so persistence happens transparently.
@@ -234,6 +299,13 @@ export function useChat(options: UseChatOptions): UseChatResult {
       try {
         const client = createClient(provider);
         let finalContent = "";
+        // Recorded across every iteration of the loop so the debug icon on
+        // the finished assistant message can replay the full exchange.
+        const callRecords: ToolCallRecord[] = [];
+        // Vega-Lite blocks salvaged from tool results — appended to the
+        // assistant message at the end so charts render whether or not the
+        // model echoes the spec.
+        const harvestedCharts: string[] = [];
 
         for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
           const stream = await client.chat.completions.create({
@@ -327,45 +399,31 @@ export function useChat(options: UseChatOptions): UseChatResult {
             apiMessages.push(assistantTurn);
 
             for (const tc of toolCalls) {
+              const callId = tc.id || newId("call");
               const binding = resolveTool(tc.name);
-              let toolResult: string;
-              if (!binding) {
-                toolResult = `Tool "${tc.name}" is not addressable from helix.`;
-              } else {
-                let args: Record<string, unknown> = {};
-                try {
-                  args = tc.arguments ? JSON.parse(tc.arguments) : {};
-                } catch (parseErr) {
-                  toolResult = `Could not parse tool arguments: ${
-                    parseErr instanceof Error
-                      ? parseErr.message
-                      : String(parseErr)
-                  }`;
-                  apiMessages.push({
-                    role: "tool",
-                    tool_call_id: tc.id || newId("call"),
-                    content: toolResult,
-                  } satisfies ChatToolMessage);
-                  continue;
-                }
-                try {
-                  const result = await window.helixApi.callMcpTool(
-                    binding.serverId,
-                    binding.toolName,
-                    args,
-                  );
-                  toolResult = result.isError
-                    ? `Tool error: ${result.content}`
-                    : result.content;
-                } catch (callErr) {
-                  toolResult = `Tool call failed: ${
-                    callErr instanceof Error ? callErr.message : String(callErr)
-                  }`;
+              const startedAt = performance.now();
+              const { result: toolResult, isError } = await runToolCall(
+                binding,
+                tc.name,
+                tc.arguments,
+              );
+              if (!isError) {
+                for (const block of extractVegaBlocks(toolResult)) {
+                  harvestedCharts.push(block);
                 }
               }
+              callRecords.push({
+                id: callId,
+                serverId: binding?.serverId ?? "?",
+                toolName: binding?.toolName ?? tc.name,
+                arguments: tc.arguments || "{}",
+                result: toolResult,
+                isError,
+                durationMs: Math.round(performance.now() - startedAt),
+              });
               apiMessages.push({
                 role: "tool",
-                tool_call_id: tc.id || newId("call"),
+                tool_call_id: callId,
                 content: toolResult,
               } satisfies ChatToolMessage);
             }
@@ -378,10 +436,30 @@ export function useChat(options: UseChatOptions): UseChatResult {
           break;
         }
 
+        // Append any vega-lite blocks we lifted out of tool results that
+        // didn't make it into the model's final text. Dedupe by exact-string
+        // match: if the model already echoed a spec, we won't duplicate it.
+        if (harvestedCharts.length > 0) {
+          const missing = harvestedCharts.filter(
+            (block) => !finalContent.includes(block),
+          );
+          if (missing.length > 0) {
+            const prefix = finalContent.trim();
+            finalContent = prefix
+              ? `${prefix}\n\n${missing.join("\n\n")}`
+              : missing.join("\n\n");
+          }
+        }
+
         patch((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: finalContent, status: "complete" }
+              ? {
+                  ...m,
+                  content: finalContent,
+                  status: "complete",
+                  toolCalls: callRecords.length > 0 ? callRecords : undefined,
+                }
               : m,
           ),
         );

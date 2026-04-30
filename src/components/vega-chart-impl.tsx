@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { VegaEmbed } from "react-vega";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Config } from "vega";
-import type { VisualizationSpec } from "vega-embed";
+import type { Result, VisualizationSpec } from "vega-embed";
 
 // Vega's `Config` type only enumerates Vega-native mark keys (rect, symbol,
 // rule, …) and rejects Vega-Lite ones (bar, point) under excess-property
@@ -16,27 +15,164 @@ interface VegaChartProps {
 }
 
 type ParseResult =
-  | { ok: true; spec: VisualizationSpec }
-  | { ok: false; error: string };
+  | {
+      ok: true;
+      spec: VisualizationSpec;
+      /** The fenced language tag (`vega`, `vega-lite`, `vegalite`). Forwarded
+       * to `vegaEmbed` as `mode`, so the compiler is picked by the block tag
+       * rather than a hardcoded `$schema` URL. */
+      language: string;
+    }
+  | { ok: false; error: string; pending: boolean };
+
+/** A streamed code block can end mid-token while `isIncomplete` is briefly
+ * stale. Treat the spec as still-loading when its JSON skeleton hasn't
+ * closed yet — same braces / brackets balance, ends on `}` or `]`. */
+function looksComplete(code: string): boolean {
+  const last = code.slice(-1);
+  if (last !== "}" && last !== "]") return false;
+  let braces = 0;
+  let brackets = 0;
+  let inString = false;
+  let escape = false;
+  for (const c of code) {
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (c === "\\") {
+        escape = true;
+        continue;
+      }
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{") braces++;
+    else if (c === "}") braces--;
+    else if (c === "[") brackets++;
+    else if (c === "]") brackets--;
+  }
+  return braces === 0 && brackets === 0 && !inString;
+}
+
+/** Repair common LLM-generated JSON quirks before handing off to JSON.parse:
+ * - Strip `// line` and `/* block * /` comments (models occasionally emit them).
+ * - Escape literal newlines / tabs / carriage returns that appear inside
+ *   string literals — the prime cause of "Unterminated string" errors when
+ *   a model breaks a long description across lines.
+ * - Drop trailing commas before `]` and `}`. */
+function repairJson(input: string): string {
+  // Strip block comments first (so a `/*` inside a string doesn't get
+  // mistaken for a comment by the line-comment pass).
+  let s = input.replace(/\/\*[\s\S]*?\*\//g, "");
+  // Strip `//` line comments only when they're not inside a string. Cheap
+  // approximation: only strip when the start of the line (or preceded by
+  // whitespace + non-quote) starts with `//`.
+  s = s
+    .split("\n")
+    .map((line) => {
+      const idx = line.indexOf("//");
+      if (idx < 0) return line;
+      // Don't strip if there's an unbalanced `"` count before `//` — likely
+      // inside a string literal.
+      const before = line.slice(0, idx);
+      const quotes = (before.match(/(?:^|[^\\])"/g) ?? []).length;
+      if (quotes % 2 === 1) return line;
+      return before;
+    })
+    .join("\n");
+
+  // Walk char by char to escape literal control chars inside strings.
+  const out: string[] = [];
+  let inString = false;
+  let escape = false;
+  for (const c of s) {
+    if (inString) {
+      if (escape) {
+        out.push(c);
+        escape = false;
+        continue;
+      }
+      if (c === "\\") {
+        out.push(c);
+        escape = true;
+        continue;
+      }
+      if (c === '"') {
+        out.push(c);
+        inString = false;
+        continue;
+      }
+      if (c === "\n") {
+        out.push("\\n");
+        continue;
+      }
+      if (c === "\r") {
+        out.push("\\r");
+        continue;
+      }
+      if (c === "\t") {
+        out.push("\\t");
+        continue;
+      }
+      out.push(c);
+    } else {
+      if (c === '"') inString = true;
+      out.push(c);
+    }
+  }
+  s = out.join("");
+
+  // Drop trailing commas: `[1, 2, 3,]` → `[1, 2, 3]`.
+  s = s.replace(/,(\s*[}\]])/g, "$1");
+
+  return s;
+}
 
 // Vega-Lite specs without an explicit $schema still work with vega-embed —
-// it falls back to vega-lite mode. For raw `vega` blocks, point $schema at
-// the Vega schema so embed picks the correct compiler.
+// it falls back to vega-lite mode. We pick the compiler mode via the embed
+// options instead of injecting a $schema URL into the spec, so the bundle
+// has zero references to vega.github.io.
 function parseSpec(code: string, language: string): ParseResult {
   const trimmed = code.trim();
-  if (!trimmed) return { ok: false, error: "empty spec" };
-  try {
-    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-    if (language === "vega" && !parsed.$schema) {
-      parsed.$schema = "https://vega.github.io/schema/vega/v6.json";
-    }
-    // Let the chat surface show through — the .vega-chart container already
-    // paints the panel bg.
-    if (parsed.background === undefined) parsed.background = "transparent";
-    return { ok: true, spec: parsed as VisualizationSpec };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  if (!trimmed) {
+    return { ok: false, error: "empty spec", pending: true };
   }
+
+  // Fast path: most well-formed specs go straight through.
+  let parsed: Record<string, unknown> | null = null;
+  let firstError: unknown = null;
+  try {
+    parsed = JSON.parse(trimmed) as Record<string, unknown>;
+  } catch (err) {
+    firstError = err;
+  }
+
+  // Fall back to a repaired version if the strict parse failed.
+  if (!parsed) {
+    try {
+      parsed = JSON.parse(repairJson(trimmed)) as Record<string, unknown>;
+    } catch {
+      // Treat as "still streaming" if the brace/bracket structure isn't
+      // balanced yet — the renderer will show a pending state instead of
+      // a red error.
+      const pending = !looksComplete(trimmed);
+      const message =
+        firstError instanceof Error
+          ? firstError.message
+          : String(firstError);
+      return { ok: false, error: message, pending };
+    }
+  }
+
+  if (parsed.background === undefined) parsed.background = "transparent";
+  // Strip any $schema the model emitted — keeping it would still pass the
+  // string into vega-embed, and even though embed never *fetches* it, the
+  // less the chart references vega.github.io the cleaner the audit.
+  if ("$schema" in parsed) delete parsed.$schema;
+  return { ok: true, spec: parsed as VisualizationSpec, language };
 }
 
 interface ThemeTokens {
@@ -187,11 +323,15 @@ export function VegaChart({ code, language, isIncomplete }: VegaChartProps) {
   const tokens = useThemeTokens();
   const parsed = useMemo(() => parseSpec(code, language), [code, language]);
   const config = useMemo(() => (tokens ? buildConfig(tokens) : undefined), [tokens]);
-  // Re-mount the embed when the theme flips so vega rebuilds scales/legends
-  // against the new config rather than diffing the old palette in place.
-  const themeKey = tokens?.themeId ?? "default";
 
-  if (isIncomplete) {
+  // Pending only when our own parse failed AND the JSON skeleton isn't
+  // closed yet. We deliberately ignore streamdown's `isIncomplete` here:
+  // when content is patched in atomically (tool-result harvest, replayed
+  // sessions) it can lie about a complete block, and we don't want a valid
+  // spec stuck behind a stale flag. Once the brace/bracket balance is good
+  // the fast/repair JSON.parse path will succeed and we'll render.
+  void isIncomplete;
+  if (!parsed.ok && parsed.pending) {
     return (
       <div className="vega-chart vega-chart--pending" role="status">
         <span className="vega-chart-pending-label">rendering chart…</span>
@@ -209,17 +349,121 @@ export function VegaChart({ code, language, isIncomplete }: VegaChartProps) {
   }
 
   return (
-    <div className="vega-chart">
-      <VegaEmbed
-        key={themeKey}
-        spec={parsed.spec}
-        options={{
+    <ChartHost
+      spec={parsed.spec}
+      language={parsed.language}
+      config={config}
+      tokens={tokens}
+    />
+  );
+}
+
+/** Run vega-embed directly against a ref'd div. We bypass `react-vega` so:
+ *  1. `"width": "container"` is measured against the actual host element
+ *     instead of a wrapper component that may render at intrinsic width.
+ *  2. A ResizeObserver re-renders the chart when the container resizes,
+ *     so a chart that originally fit a 600px panel reflows when the
+ *     workspace tree opens or the window resizes. */
+function ChartHost({
+  spec,
+  language,
+  config,
+  tokens,
+}: {
+  readonly spec: VisualizationSpec;
+  readonly language: string;
+  readonly config: VegaLikeConfig | undefined;
+  readonly tokens: ThemeTokens | null;
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  // Cache the latest result so the ResizeObserver tear-down knows what to
+  // finalize between renders. Tracking via ref dodges the re-render cascade
+  // a useState would trigger on every observer tick.
+  const viewRef = useRef<Result["view"] | null>(null);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    let cancelled = false;
+    let observer: ResizeObserver | null = null;
+
+    async function render() {
+      // Tauri's CSP forbids `unsafe-eval`, but vega-lite's default expression
+      // compiler builds `new Function(...)` runtimes for every formula
+      // transform / signal. The interpreter walks an AST instead — slower
+      // for huge specs, but safe under our CSP. Pair it with `ast: true` so
+      // vega emits the AST form vega-interpreter expects.
+      const [{ default: vegaEmbed }, { expressionInterpreter }] =
+        await Promise.all([
+          import("vega-embed"),
+          import("vega-interpreter"),
+        ]);
+      if (cancelled || !hostRef.current) return;
+      // Drop the previous view before mounting a new one — vega-embed leaks
+      // canvases otherwise when re-running on resize.
+      if (viewRef.current) {
+        viewRef.current.finalize();
+        viewRef.current = null;
+      }
+      // `mode` picks the compiler from the fenced language tag (no $schema
+      // URL needed). Default to vega-lite for any unrecognised tag.
+      const mode = language === "vega" ? "vega" : "vega-lite";
+      try {
+        const result = await vegaEmbed(hostRef.current, spec, {
+          mode,
           actions: { export: true, source: false, compiled: false, editor: false },
           renderer: "canvas",
+          ast: true,
+          expr: expressionInterpreter,
           config: config as Config | undefined,
           tooltip: { theme: tokens?.themeId.includes("dark") ? "dark" : "light" },
-        }}
-      />
+        });
+        if (cancelled) {
+          result.finalize();
+          return;
+        }
+        viewRef.current = result.view;
+      } catch (err) {
+        // Render-time errors (e.g. an invalid scheme on the config) land
+        // here. Surface them inside the host div so the user sees something
+        // actionable instead of an empty box.
+        const target = hostRef.current;
+        if (!target) return;
+        const message = err instanceof Error ? err.message : String(err);
+        target.textContent = `Vega render failed: ${message}`;
+        target.setAttribute("data-vega-failed", "true");
+      }
+    }
+
+    void render();
+
+    // Re-run on resize so `width: "container"` reflows. Debounce to a
+    // single rAF tick so dragging a window edge doesn't queue dozens of
+    // embeds back-to-back.
+    let frame: number | null = null;
+    observer = new ResizeObserver(() => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        if (!cancelled) void render();
+      });
+    });
+    observer.observe(host);
+
+    return () => {
+      cancelled = true;
+      if (frame !== null) cancelAnimationFrame(frame);
+      observer?.disconnect();
+      if (viewRef.current) {
+        viewRef.current.finalize();
+        viewRef.current = null;
+      }
+    };
+  }, [spec, language, config, tokens]);
+
+  return (
+    <div className="vega-chart">
+      <div ref={hostRef} className="vega-chart-host" />
     </div>
   );
 }

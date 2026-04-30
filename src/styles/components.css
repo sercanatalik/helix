@@ -527,21 +527,18 @@
   overflow-y: auto;
 }
 .mcp-menu-section + .mcp-menu-section {
-  margin-top: 4px;
-  padding-top: 4px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px solid var(--border-subtle);
 }
 .mcp-menu-section-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px 4px;
-  font-size: 9.5px;
+  gap: 6px;
+  padding: 4px 10px 4px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--fg-dim);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-family: var(--font-mono);
+  color: var(--fg-muted);
 }
 .mcp-menu-section-name {
   flex: 1 1 auto;
@@ -552,11 +549,9 @@
 }
 .mcp-menu-section-count {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--fg-dim);
   font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
 }
 .mcp-menu-section-error {
   margin: 4px 10px 6px;
@@ -598,6 +593,44 @@
 }
 .mcp-menu-item-tool .mcp-menu-item-body {
   cursor: default;
+}
+
+/* gcf-desktop-style toggle rows: switch on the left, then a single inline
+ * label that runs `name — description` like a manpage entry. Tighter than
+ * the action rows because there's no chevron taking up trailing space. */
+.mcp-menu-item-toggle {
+  border-radius: 4px;
+}
+.mcp-menu-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.mcp-menu-toggle-row:hover {
+  background: var(--bg-elev-2);
+}
+.mcp-menu-toggle-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg);
+  /* Allow wrapping for long descriptions, but keep code names intact. */
+  word-break: break-word;
+}
+.mcp-menu-item-sep {
+  color: var(--fg-dim);
+}
+.mcp-menu-item-desc-inline {
+  color: var(--fg-muted);
+}
+.mcp-menu-item-args {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-dim);
 }
 .mcp-menu-item-text {
   flex: 1 1 auto;
@@ -753,6 +786,131 @@
   padding: 6px 10px;
   border-radius: 6px;
 }
+/* ---------- Tool-call debug toggle on assistant messages ---------- */
+.msg-tool-debug {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-tool-debug-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.msg-tool-debug-toggle:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+  background: var(--bg-elev);
+}
+.msg-tool-debug-toggle[data-open] {
+  color: var(--fg);
+  border-color: var(--border-strong);
+  background: var(--bg-elev);
+}
+.msg-tool-debug-toggle[data-has-errors] {
+  border-color: color-mix(in oklab, var(--danger-raw, #c53030) 30%, transparent);
+}
+.msg-tool-debug-error-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger-raw, #c53030);
+  display: inline-block;
+}
+.msg-tool-call-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-tool-call {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.msg-tool-call[data-error] {
+  border-color: color-mix(in oklab, var(--danger-raw, #c53030) 35%, transparent);
+  background: color-mix(in oklab, var(--danger-raw, #c53030) 4%, var(--bg));
+}
+.msg-tool-call-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.msg-tool-call-index {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+}
+.msg-tool-call-name {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg);
+  font-weight: 600;
+}
+.msg-tool-call-tag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--danger-raw, #c53030) 14%, transparent);
+  color: var(--danger-raw, #c53030);
+  font-weight: 600;
+}
+.msg-tool-call-duration {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+}
+.msg-tool-call-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.msg-tool-call-section-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.msg-tool-call-section-body {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
 .msg[data-status="error"] .msg-content {
   color: var(--danger);
 }
@@ -1592,6 +1750,20 @@
   background: var(--bg-elev);
   overflow-x: auto;
   position: relative;
+}
+/* Host element vega-embed mounts into. Explicit 100% width is what makes
+ * `"width": "container"` in the spec work — vega measures clientWidth at
+ * embed time and renders to that size. Without this the host shrinks to
+ * its intrinsic content width (zero) and the canvas comes out empty. */
+.vega-chart-host {
+  width: 100%;
+  display: block;
+}
+.vega-chart-host[data-vega-failed="true"] {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--danger-raw, #c53030);
+  white-space: pre-wrap;
 }
 .vega-chart canvas,
 .vega-chart svg {

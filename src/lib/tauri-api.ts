@@ -95,6 +95,20 @@ export const helixApi = {
       enabled,
     }),
 
+  /** Toggle a prompt's persistent "inject as hidden system context every
+   * message" flag. Opt-in: prompts default to off because auto-prepending
+   * everything a server advertises would balloon the model's context. */
+  setMcpPromptEnabled: (
+    serverId: string,
+    promptName: string,
+    enabled: boolean,
+  ): Promise<DesktopAppState> =>
+    invoke<DesktopAppState>("set_mcp_prompt_enabled", {
+      serverId,
+      promptName,
+      enabled,
+    }),
+
   callMcpPrompt: (
     serverId: string,
     name: string,

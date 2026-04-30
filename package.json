@@ -32,6 +32,7 @@
     "tailwind-merge": "^3.5.0",
     "vega": "^6.2.0",
     "vega-embed": "^7.1.0",
+    "vega-interpreter": "^2.2.1",
     "vega-lite": "^6.4.3"
   },
   "devDependencies": {

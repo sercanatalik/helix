@@ -22,9 +22,11 @@ function PendingFallback({ label }: { readonly label: string }) {
 }
 
 export function VegaChart({ code, language, isIncomplete }: VegaChartProps) {
-  if (isIncomplete) {
-    return <PendingFallback label="rendering chart…" />;
-  }
+  // Always mount the impl — it does its own structural check and only shows
+  // the pending state while the JSON skeleton is still unbalanced. The
+  // outer `isIncomplete` flag from streamdown isn't reliable when content
+  // is patched in atomically (e.g. tool-result harvest), which would leave
+  // a complete spec stuck on "rendering chart…" forever.
   return (
     <Suspense fallback={<PendingFallback label="loading chart engine…" />}>
       <VegaChartImpl code={code} language={language} isIncomplete={isIncomplete} />

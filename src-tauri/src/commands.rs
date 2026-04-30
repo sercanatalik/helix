@@ -293,6 +293,13 @@ fn apply_patch(server: &mut McpServerConfig, patch: McpServerPatch) {
             Some(disabled)
         };
     }
+    if let Some(enabled_prompts) = patch.enabled_prompts {
+        server.enabled_prompts = if enabled_prompts.is_empty() {
+            None
+        } else {
+            Some(enabled_prompts)
+        };
+    }
 }
 
 #[tauri::command]
@@ -315,6 +322,7 @@ pub fn add_mcp_server(
         attach_basic_auth_header: normalized.attach_basic_auth_header,
         source_key: normalized.source_key,
         disabled_tools: normalized.disabled_tools,
+        enabled_prompts: normalized.enabled_prompts,
     };
     let snapshot = {
         let mut guard = state.lock().expect("state poisoned");
@@ -403,6 +411,39 @@ pub fn set_mcp_tool_enabled(
     guard.clone()
 }
 
+/// Toggle a prompt's "always inject as system context" flag. Mirrors
+/// `set_mcp_tool_enabled` but with reversed default semantics — prompts are
+/// opt-in, so the field stores the *enabled* set rather than the disabled set.
+#[tauri::command]
+pub fn set_mcp_prompt_enabled(
+    server_id: String,
+    prompt_name: String,
+    enabled: bool,
+    state: State<'_, SharedState>,
+) -> DesktopAppState {
+    let mut guard = state.lock().expect("state poisoned");
+    for server in guard.mcp_servers.iter_mut() {
+        if server.id != server_id {
+            continue;
+        }
+        let mut active = server.enabled_prompts.clone().unwrap_or_default();
+        if enabled {
+            if !active.iter().any(|n| n == &prompt_name) {
+                active.push(prompt_name.clone());
+            }
+        } else {
+            active.retain(|n| n != &prompt_name);
+        }
+        server.enabled_prompts = if active.is_empty() {
+            None
+        } else {
+            Some(active)
+        };
+        break;
+    }
+    guard.clone()
+}
+
 #[tauri::command]
 pub async fn call_mcp_prompt(
     server_id: String,
@@ -462,6 +503,7 @@ pub async fn test_mcp_server(input: McpServerInput) -> McpTestResult {
         attach_basic_auth_header: input.attach_basic_auth_header,
         source_key: input.source_key,
         disabled_tools: input.disabled_tools,
+        enabled_prompts: input.enabled_prompts,
     };
     crate::mcp::test_connection(&probe).await
 }

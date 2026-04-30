@@ -32,7 +32,13 @@ export interface McpServerConfig {
   readonly customHeaders?: readonly CustomHeader[];
   readonly attachBasicAuthHeader?: boolean;
   readonly sourceKey?: string;
+  /** Tools the user has hidden from the model. Opt-out — anything not in
+   * this list is exposed by default. */
   readonly disabledTools?: readonly string[];
+  /** Prompts the user has chosen to inject as hidden system context every
+   * message. Opt-in — defaults to empty so we don't auto-prepend everything
+   * a server advertises. */
+  readonly enabledPrompts?: readonly string[];
 }
 
 export type McpServerInput = Omit<McpServerConfig, "id">;
@@ -116,12 +122,38 @@ export type SessionStatus = "idle" | "running" | "failed";
 
 export type MessageStatus = "streaming" | "complete" | "error";
 
+/** Record of one MCP tool call that ran while producing the assistant
+ * message it's attached to. Kept on the transcript so the user can
+ * retroactively inspect what the model did, even though the call itself
+ * stays hidden during streaming. */
+export interface ToolCallRecord {
+  readonly id: string;
+  readonly serverId: string;
+  readonly serverName?: string;
+  readonly toolName: string;
+  /** JSON-encoded arguments string as sent to the server. Stored as the
+   * raw stream — the agent loop accumulates this from streaming deltas, so
+   * keeping it as a string preserves whatever the model emitted (including
+   * partial-but-valid JSON). */
+  readonly arguments: string;
+  /** Flat-text result returned by the tool. Errors are also stored here
+   * (with `isError: true` set) so the debug panel can render them
+   * uniformly. */
+  readonly result: string;
+  readonly isError: boolean;
+  readonly durationMs?: number;
+}
+
 export interface TranscriptMessage {
   readonly id: string;
   readonly role: "user" | "assistant" | "system";
   readonly content: string;
   readonly createdAt: Timestamp;
   readonly status?: MessageStatus;
+  /** Tool calls that ran while producing this assistant message, in order
+   * of execution. Populated by `useChat` after each agent-loop iteration;
+   * the user only sees them by clicking the debug icon. */
+  readonly toolCalls?: readonly ToolCallRecord[];
 }
 
 export interface SessionRecord {

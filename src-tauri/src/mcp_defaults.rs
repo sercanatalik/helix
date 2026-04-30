@@ -103,6 +103,7 @@ fn parse_entry(key: &str, v: &Value) -> Option<McpDefaultEntry> {
             },
             source_key: Some(key.to_string()),
             disabled_tools: None,
+            enabled_prompts: None,
         },
     })
 }

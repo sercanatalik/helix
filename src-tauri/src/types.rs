@@ -88,8 +88,15 @@ pub struct McpServerConfig {
     pub attach_basic_auth_header: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub source_key: Option<String>,
+    /// Tools the user has hidden from the model. Opt-out: any tool not in
+    /// this list is exposed by default. Mirrors gcf-desktop's contract.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub disabled_tools: Option<Vec<String>>,
+    /// Prompts the user has chosen to inject as hidden system context on
+    /// every message. Opt-in: prompts default to off because auto-injecting
+    /// every advertised prompt would balloon the model's context.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub enabled_prompts: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -114,6 +121,8 @@ pub struct McpServerInput {
     pub source_key: Option<String>,
     #[serde(default)]
     pub disabled_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub enabled_prompts: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -141,6 +150,8 @@ pub struct McpServerPatch {
     pub source_key: Option<String>,
     #[serde(default)]
     pub disabled_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub enabled_prompts: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]

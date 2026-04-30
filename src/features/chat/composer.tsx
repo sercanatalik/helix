@@ -67,7 +67,8 @@ export function Composer({
   >([]);
   const canSend = text.trim().length > 0 && !disabled;
 
-  const { servers, runtime, setToolEnabled } = useMcpServers();
+  const { servers, runtime, setToolEnabled, setPromptEnabled } =
+    useMcpServers();
 
   // Walk every server with a "connected" runtime entry and aggregate its
   // discovered items per-kind. Each group keeps its source server so the
@@ -96,6 +97,25 @@ export function Composer({
         (acc, g) => acc + activeToolCount(g),
         0,
       ),
+      prompts: groups.prompts.reduce(
+        (acc, g) => acc + activePromptCount(g),
+        0,
+      ),
+      resources: groups.resources.reduce(
+        (acc, g) => acc + g.items.length,
+        0,
+      ),
+    }),
+    [groups],
+  );
+
+  /** Total advertised across all connected servers, ignoring user toggles.
+   * Used for the `enabled/total` ratio in the chip count — tools and prompts
+   * are opt-out / opt-in respectively, and the ratio gives a quick read of
+   * "how many of what's available am I currently using". */
+  const totals: Record<ChipKind, number> = useMemo(
+    () => ({
+      tools: groups.tools.reduce((acc, g) => acc + g.items.length, 0),
       prompts: groups.prompts.reduce((acc, g) => acc + g.items.length, 0),
       resources: groups.resources.reduce(
         (acc, g) => acc + g.items.length,
@@ -132,42 +152,54 @@ export function Composer({
     setPendingContext((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
-  const onInvokePrompt = async (
-    server: McpServerConfig,
-    prompt: McpPromptInfo,
-  ) => {
-    const entryId = `prompt:${server.id}:${prompt.name}`;
-    const key = `${server.id}::prompt::${prompt.name}`;
-    if (pendingContext.some((p) => p.id === entryId)) {
-      // Already loaded — just close the menu so the user can confirm the
-      // chip appeared.
-      setOpen(null);
-      return;
-    }
-    setRunning(key);
-    try {
-      const result = await window.helixApi.callMcpPrompt(
-        server.id,
-        prompt.name,
-        {},
-      );
-      if (result.error) {
-        setItemError(key, result.error);
-        return;
+  /** Fetch every prompt the user has marked enabled (across all connected
+   * servers) and concatenate the results into a list of system messages.
+   * Called from `submit` so each send sees fresh content — if a prompt
+   * changes server-side, the next message picks it up automatically. */
+  const fetchEnabledPromptContext = async (): Promise<string[]> => {
+    const targets: { server: McpServerConfig; prompt: McpPromptInfo }[] = [];
+    for (const group of groups.prompts) {
+      const enabled = new Set(group.server.enabledPrompts ?? []);
+      if (enabled.size === 0) continue;
+      for (const prompt of group.items) {
+        if (enabled.has(prompt.name)) {
+          targets.push({ server: group.server, prompt });
+        }
       }
-      const content = result.messages.map((m) => m.content).join("\n\n");
-      addPendingContext({
-        id: entryId,
-        kind: "prompt",
-        serverName: server.name,
-        label: prompt.name,
-        content: contextHeader("prompt", server.name, prompt.name) + content,
-      });
-      clearItem(key);
-      setOpen(null);
-    } catch (err) {
-      setItemError(key, err instanceof Error ? err.message : String(err));
     }
+    if (targets.length === 0) return [];
+
+    const results = await Promise.all(
+      targets.map(async ({ server, prompt }) => {
+        try {
+          const result = await window.helixApi.callMcpPrompt(
+            server.id,
+            prompt.name,
+            {},
+          );
+          if (result.error) {
+            return (
+              contextHeader("prompt", server.name, prompt.name) +
+              `Failed to load this prompt: ${result.error}`
+            );
+          }
+          const content = result.messages
+            .map((m) => m.content)
+            .join("\n\n");
+          return (
+            contextHeader("prompt", server.name, prompt.name) + content
+          );
+        } catch (err) {
+          return (
+            contextHeader("prompt", server.name, prompt.name) +
+            `Failed to load this prompt: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
+        }
+      }),
+    );
+    return results;
   };
 
   const onReadResource = async (
@@ -206,6 +238,28 @@ export function Composer({
     }
   };
 
+  /** Persistent indicators for prompts the user has toggled on. Same chip
+   * style as one-shot resources, but the × calls back into the toggle so the
+   * change persists in `enabledPrompts`. Recomputed on every server-state
+   * push so toggles applied from anywhere stay in sync. */
+  const enabledPromptChips = useMemo(() => {
+    const out: { id: string; serverId: string; promptName: string; serverName: string }[] = [];
+    for (const group of groups.prompts) {
+      const enabled = new Set(group.server.enabledPrompts ?? []);
+      for (const prompt of group.items) {
+        if (enabled.has(prompt.name)) {
+          out.push({
+            id: `prompt:${group.server.id}:${prompt.name}`,
+            serverId: group.server.id,
+            promptName: prompt.name,
+            serverName: group.server.name,
+          });
+        }
+      }
+    }
+    return out;
+  }, [groups.prompts]);
+
   /** Build the McpToolBinding list passed to the chat hook. We include every
    * advertised tool from a *connected* server that hasn't been disabled by
    * the user — so the toggle in the menu controls model visibility directly. */
@@ -226,23 +280,30 @@ export function Composer({
     return out;
   }, [groups.tools]);
 
-  function submit() {
+  async function submit() {
     if (!canSend) return;
+    // Snapshot text + clear immediately so the textarea feels responsive
+    // while we round-trip to MCP for prompt content.
+    const userText = text;
+    setText("");
+    const oneShotContext = pendingContext.map((p) => p.content);
+    setPendingContext([]);
+
+    const promptContext = await fetchEnabledPromptContext();
+
     const extras: ChatExtras = {
-      systemContext: pendingContext.map((p) => p.content),
+      // Persistent prompt context goes first so it grounds the rest of the
+      // turn; one-shot resources follow as additional context.
+      systemContext: [...promptContext, ...oneShotContext],
       mcpTools: mcpToolBindings,
     };
-    onSend(text, extras);
-    setText("");
-    // Pending context is one-shot — clear it so the next message doesn't
-    // double-inject. Tool toggles persist (they live on the server config).
-    setPendingContext([]);
+    onSend(userText, extras);
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      submit();
+      void submit();
     }
   }
 
@@ -254,7 +315,7 @@ export function Composer({
           <ToolChip
             icon={<WrenchIcon />}
             label="Tools"
-            count={counts.tools}
+            count={`${counts.tools}/${totals.tools}`}
             active={open === "tools"}
             disabled={!anyConnected}
             onClick={() => toggle("tools")}
@@ -262,7 +323,7 @@ export function Composer({
           <ToolChip
             icon={<SparkleIcon />}
             label="Prompts"
-            count={counts.prompts}
+            count={`${counts.prompts}/${totals.prompts}`}
             active={open === "prompts"}
             disabled={!anyConnected}
             onClick={() => toggle("prompts")}
@@ -281,8 +342,30 @@ export function Composer({
           ) : null}
         </div>
 
-        {pendingContext.length > 0 ? (
+        {enabledPromptChips.length > 0 || pendingContext.length > 0 ? (
           <div className="composer-context" role="list">
+            {enabledPromptChips.map((chip) => (
+              <span
+                key={chip.id}
+                role="listitem"
+                className="composer-context-chip"
+                data-kind="prompt"
+                title={`Prompt from ${chip.serverName} — re-fetched and injected as hidden system context every message. Click × to disable.`}
+              >
+                <span className="composer-context-kind">prompt</span>
+                <span className="composer-context-label">{chip.promptName}</span>
+                <button
+                  type="button"
+                  className="composer-context-remove"
+                  onClick={() =>
+                    void setPromptEnabled(chip.serverId, chip.promptName, false)
+                  }
+                  aria-label={`Disable prompt ${chip.promptName}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
             {pendingContext.map((entry) => (
               <span
                 key={entry.id}
@@ -323,8 +406,8 @@ export function Composer({
             onToggleTool={(serverId, toolName, nextEnabled) =>
               void setToolEnabled(serverId, toolName, nextEnabled)
             }
-            onInvokePrompt={(server, prompt) =>
-              void onInvokePrompt(server, prompt)
+            onTogglePrompt={(serverId, promptName, nextEnabled) =>
+              void setPromptEnabled(serverId, promptName, nextEnabled)
             }
             onReadResource={(server, resource) =>
               void onReadResource(server, resource)
@@ -357,7 +440,7 @@ export function Composer({
                 <Kbd>/</Kbd> skills
               </span>
             </div>
-            <Button disabled={!canSend} onClick={submit}>
+            <Button disabled={!canSend} onClick={() => void submit()}>
               Send
               <SendIcon />
             </Button>
@@ -388,14 +471,34 @@ function activeToolCount(group: ServerGroup<McpToolInfo>): number {
   return n;
 }
 
+function activePromptCount(group: ServerGroup<McpPromptInfo>): number {
+  const enabled = new Set(group.server.enabledPrompts ?? []);
+  if (enabled.size === 0) return 0;
+  let n = 0;
+  for (const p of group.items) {
+    if (enabled.has(p.name)) n++;
+  }
+  return n;
+}
+
 function isToolEnabled(server: McpServerConfig, toolName: string): boolean {
   return !(server.disabledTools ?? []).includes(toolName);
+}
+
+function isPromptEnabled(
+  server: McpServerConfig,
+  promptName: string,
+): boolean {
+  return (server.enabledPrompts ?? []).includes(promptName);
 }
 
 interface ToolChipProps {
   readonly icon: React.ReactNode;
   readonly label: string;
-  readonly count: number;
+  /** Either a plain count (`5`) or a ratio string (`5/8`). gcf-desktop uses
+   * the ratio for tools/prompts so a quick glance shows how much of what's
+   * available is currently in play. */
+  readonly count: number | string;
   readonly active?: boolean;
   readonly disabled?: boolean;
   readonly onClick?: () => void;
@@ -449,9 +552,10 @@ interface McpDiscoveryPopoverProps {
     toolName: string,
     nextEnabled: boolean,
   ) => void;
-  readonly onInvokePrompt: (
-    server: McpServerConfig,
-    prompt: McpPromptInfo,
+  readonly onTogglePrompt: (
+    serverId: string,
+    promptName: string,
+    nextEnabled: boolean,
   ) => void;
   readonly onReadResource: (
     server: McpServerConfig,
@@ -465,7 +569,7 @@ function McpDiscoveryPopover({
   itemState,
   onClose,
   onToggleTool,
-  onInvokePrompt,
+  onTogglePrompt,
   onReadResource,
 }: McpDiscoveryPopoverProps) {
   const totalAdvertised = groups.reduce(
@@ -476,7 +580,7 @@ function McpDiscoveryPopover({
     kind === "tools"
       ? "Toggle which tools the assistant can call."
       : kind === "prompts"
-        ? "Click a prompt to insert it into the composer."
+        ? "Toggle prompts on to inject them as hidden context every turn."
         : "Click a resource to fetch and attach its contents.";
 
   return (
@@ -516,7 +620,7 @@ function McpDiscoveryPopover({
               group={group}
               itemState={itemState}
               onToggleTool={onToggleTool}
-              onInvokePrompt={onInvokePrompt}
+              onTogglePrompt={onTogglePrompt}
               onReadResource={onReadResource}
             />
           ))}
@@ -531,7 +635,7 @@ function ServerSection({
   group,
   itemState,
   onToggleTool,
-  onInvokePrompt,
+  onTogglePrompt,
   onReadResource,
 }: {
   readonly kind: ChipKind;
@@ -541,7 +645,7 @@ function ServerSection({
     | ServerGroup<McpResourceInfo>;
   readonly itemState: McpDiscoveryPopoverProps["itemState"];
   readonly onToggleTool: McpDiscoveryPopoverProps["onToggleTool"];
-  readonly onInvokePrompt: McpDiscoveryPopoverProps["onInvokePrompt"];
+  readonly onTogglePrompt: McpDiscoveryPopoverProps["onTogglePrompt"];
   readonly onReadResource: McpDiscoveryPopoverProps["onReadResource"];
 }) {
   if (group.items.length === 0 && !group.listError) {
@@ -574,8 +678,7 @@ function ServerSection({
                     key={prompt.name}
                     server={group.server}
                     prompt={prompt}
-                    state={itemState[`${group.server.id}::prompt::${prompt.name}`]}
-                    onInvoke={onInvokePrompt}
+                    onToggle={onTogglePrompt}
                   />
                 ))
               : (group.items as readonly McpResourceInfo[]).map(
@@ -610,19 +713,24 @@ function ToolItem({
 }) {
   const enabled = isToolEnabled(server, tool.name);
   return (
-    <li className="mcp-menu-item mcp-menu-item-tool">
-      <label className="mcp-menu-item-body">
-        <span className="mcp-menu-item-text">
-          <code className="mcp-menu-item-name">{tool.name}</code>
-          {tool.description ? (
-            <span className="mcp-menu-item-desc">{tool.description}</span>
-          ) : null}
-        </span>
+    <li className="mcp-menu-item mcp-menu-item-toggle">
+      <label className="mcp-menu-toggle-row">
         <Switch
           checked={enabled}
           onChange={(next) => onToggle(server.id, tool.name, next)}
           ariaLabel={`Enable tool ${tool.name}`}
         />
+        <span className="mcp-menu-toggle-label">
+          <code className="mcp-menu-item-name">{tool.name}</code>
+          {tool.description ? (
+            <>
+              <span className="mcp-menu-item-sep"> — </span>
+              <span className="mcp-menu-item-desc-inline">
+                {tool.description}
+              </span>
+            </>
+          ) : null}
+        </span>
       </label>
     </li>
   );
@@ -631,46 +739,43 @@ function ToolItem({
 function PromptItem({
   server,
   prompt,
-  state,
-  onInvoke,
+  onToggle,
 }: {
   readonly server: McpServerConfig;
   readonly prompt: McpPromptInfo;
-  readonly state: "running" | { error: string } | undefined;
-  readonly onInvoke: (
-    server: McpServerConfig,
-    prompt: McpPromptInfo,
+  readonly onToggle: (
+    serverId: string,
+    promptName: string,
+    nextEnabled: boolean,
   ) => void;
 }) {
-  const running = state === "running";
-  const error =
-    state && typeof state === "object" && "error" in state
-      ? state.error
-      : undefined;
+  const enabled = isPromptEnabled(server, prompt.name);
   return (
-    <li className="mcp-menu-item mcp-menu-item-action">
-      <button
-        type="button"
-        className="mcp-menu-item-body"
-        onClick={() => onInvoke(server, prompt)}
-        disabled={running}
-      >
-        <span className="mcp-menu-item-text">
+    <li className="mcp-menu-item mcp-menu-item-toggle">
+      <label className="mcp-menu-toggle-row">
+        <Switch
+          checked={enabled}
+          onChange={(next) => onToggle(server.id, prompt.name, next)}
+          ariaLabel={`Inject prompt ${prompt.name} as hidden context`}
+        />
+        <span className="mcp-menu-toggle-label">
           <code className="mcp-menu-item-name">{prompt.name}</code>
           {prompt.description ? (
-            <span className="mcp-menu-item-desc">{prompt.description}</span>
+            <>
+              <span className="mcp-menu-item-sep"> — </span>
+              <span className="mcp-menu-item-desc-inline">
+                {prompt.description}
+              </span>
+            </>
           ) : null}
           {prompt.arguments && prompt.arguments.length > 0 ? (
-            <span className="mcp-menu-item-meta">
-              args: {prompt.arguments.map((a) => a.name).join(", ")}
+            <span className="mcp-menu-item-args">
+              {" "}
+              ({prompt.arguments.map((a) => a.name).join(", ")})
             </span>
           ) : null}
-          {error ? <span className="mcp-menu-item-error">{error}</span> : null}
         </span>
-        <span className="mcp-menu-item-action-trail">
-          {running ? <Spinner /> : <ChevronRightIcon />}
-        </span>
-      </button>
+      </label>
     </li>
   );
 }

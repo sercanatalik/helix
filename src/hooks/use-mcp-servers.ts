@@ -26,6 +26,11 @@ export interface UseMcpServersResult {
     toolName: string,
     enabled: boolean,
   ) => Promise<void>;
+  readonly setPromptEnabled: (
+    serverId: string,
+    promptName: string,
+    enabled: boolean,
+  ) => Promise<void>;
 }
 
 /** Read-write view over the MCP server list owned by the Rust backend.
@@ -109,5 +114,27 @@ export function useMcpServers(): UseMcpServersResult {
     [],
   );
 
-  return { servers, runtime, add, update, remove, reconnect, setToolEnabled };
+  const setPromptEnabled = useCallback(
+    async (serverId: string, promptName: string, enabled: boolean) => {
+      const state = await window.helixApi.setMcpPromptEnabled(
+        serverId,
+        promptName,
+        enabled,
+      );
+      setServers(state.mcpServers);
+      setRuntime(state.mcpRuntime);
+    },
+    [],
+  );
+
+  return {
+    servers,
+    runtime,
+    add,
+    update,
+    remove,
+    reconnect,
+    setToolEnabled,
+    setPromptEnabled,
+  };
 }

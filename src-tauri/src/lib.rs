@@ -144,6 +144,7 @@ pub fn run() {
             commands::remove_mcp_server,
             commands::reconnect_mcp_server,
             commands::set_mcp_tool_enabled,
+            commands::set_mcp_prompt_enabled,
             commands::call_mcp_prompt,
             commands::read_mcp_resource,
             commands::call_mcp_tool,

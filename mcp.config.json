@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "helix-local": {
+      "name": "Local helix MCP",
+      "transport": "http",
+      "url": "http://localhost:8000/mcp",
+      "enabled": true
+    }
+  }
+}

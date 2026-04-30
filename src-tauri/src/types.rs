@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -41,6 +42,195 @@ pub struct WorkspaceRecord {
     pub created_at: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransport {
+    #[default]
+    Http,
+    Stdio,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum McpConnectionStatus {
+    #[default]
+    Disconnected,
+    Connecting,
+    Connected,
+    Error,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomHeader {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerConfig {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub transport: McpTransport,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub args: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub custom_headers: Option<Vec<CustomHeader>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub attach_basic_auth_header: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub source_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub disabled_tools: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerInput {
+    pub name: String,
+    pub enabled: bool,
+    pub transport: McpTransport,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub custom_headers: Option<Vec<CustomHeader>>,
+    #[serde(default)]
+    pub attach_basic_auth_header: Option<bool>,
+    #[serde(default)]
+    pub source_key: Option<String>,
+    #[serde(default)]
+    pub disabled_tools: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerPatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub transport: Option<McpTransport>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub custom_headers: Option<Vec<CustomHeader>>,
+    #[serde(default)]
+    pub attach_basic_auth_header: Option<bool>,
+    #[serde(default)]
+    pub source_key: Option<String>,
+    #[serde(default)]
+    pub disabled_tools: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolInfo {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub input_schema: Option<Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPromptArg {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub required: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPromptInfo {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub arguments: Option<Vec<McpPromptArg>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct McpResourceInfo {
+    pub uri: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mime_type: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerRuntime {
+    pub status: McpConnectionStatus,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error: Option<String>,
+    pub tools: Vec<McpToolInfo>,
+    pub prompts: Vec<McpPromptInfo>,
+    pub resources: Vec<McpResourceInfo>,
+    /// Errors returned by `tools/list`, `prompts/list`, `resources/list` when
+    /// they were attempted on a connected server. Stored separately so a
+    /// failure on one capability doesn't blank out the others. None means the
+    /// list call succeeded (possibly with zero results).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tools_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub prompts_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub resources_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_connected_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPromptMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPromptResult {
+    pub messages: Vec<McpPromptMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpResourceResult {
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopAppState {
@@ -51,4 +241,6 @@ pub struct DesktopAppState {
     pub selected_session_id_by_workspace: HashMap<String, Option<String>>,
     pub theme: ThemeId,
     pub active_view: AppView,
+    pub mcp_servers: Vec<McpServerConfig>,
+    pub mcp_runtime: HashMap<String, McpServerRuntime>,
 }

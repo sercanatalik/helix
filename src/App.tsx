@@ -58,6 +58,14 @@ export function App() {
     void refresh();
   }, [refresh]);
 
+  // Subscribe to push updates from the Rust side. The McpManager emits
+  // snapshots on connect/disconnect/error transitions so MCP UIs reflect
+  // live status without polling. Cheap to keep mounted — the listener is a
+  // no-op when nothing is happening.
+  useEffect(() => {
+    return window.helixApi.onStateChanged(setState);
+  }, []);
+
   useEffect(() => {
     function handler(event: KeyboardEvent) {
       const mod = event.metaKey || event.ctrlKey;
@@ -214,7 +222,7 @@ function ChatView({
         <EmptyChat workspaceName={activeWorkspace?.displayName} />
       )}
       <Composer
-        onSend={(text) => void send(text)}
+        onSend={(text, extras) => void send(text, extras)}
         disabled={isStreaming || !activeProvider || !activeProvider.model}
         hint={hint}
         modelLabel={activeProvider?.model}

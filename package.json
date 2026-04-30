@@ -27,8 +27,12 @@
     "openai": "^6.35.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-vega": "^8.0.0",
     "streamdown": "^2.5.0",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "vega": "^6.2.0",
+    "vega-embed": "^7.1.0",
+    "vega-lite": "^6.4.3"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

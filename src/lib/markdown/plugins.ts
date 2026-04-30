@@ -1,5 +1,6 @@
 import { createCodePlugin } from "@streamdown/code";
 import { createMathPlugin } from "@streamdown/math";
+import { VegaChart } from "../../components/vega-chart";
 
 // Vitesse pair (antfu) — restrained, slightly desaturated palette that pairs
 // well with Meridian's "structured ledger" aesthetic: warm yellows for
@@ -19,4 +20,10 @@ export const STREAMDOWN_PLUGINS = {
     singleDollarTextMath: true,
     errorColor: "var(--danger)",
   }),
+  renderers: [
+    {
+      language: ["vega-lite", "vegalite", "vega"],
+      component: VegaChart,
+    },
+  ],
 };

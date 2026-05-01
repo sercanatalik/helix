@@ -167,6 +167,10 @@ pub struct McpToolInfo {
     /// fallback for servers that surface them directly.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tags: Vec<String>,
+    /// The full `_meta` payload as advertised by the server, passed through
+    /// verbatim. FastMCP namespaces extras under keys like `_fastmcp`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub meta: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -187,6 +191,10 @@ pub struct McpPromptInfo {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub arguments: Option<Vec<McpPromptArg>>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub meta: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -199,6 +207,10 @@ pub struct McpResourceInfo {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub meta: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]

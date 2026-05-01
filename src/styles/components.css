@@ -624,6 +624,11 @@
 .mcp-menu-item-sep {
   color: var(--fg-dim);
 }
+.mcp-menu-item-server {
+  font-size: 11px;
+  color: var(--fg-dim);
+  margin-right: 4px;
+}
 .mcp-menu-item-desc-inline {
   color: var(--fg-muted);
 }

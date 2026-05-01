@@ -162,6 +162,11 @@ pub struct McpToolInfo {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub input_schema: Option<Value>,
+    /// Tags advertised by the server. FastMCP exposes these under
+    /// `_meta._fastmcp.tags`; we also accept a top-level `tags` array as a
+    /// fallback for servers that surface them directly.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

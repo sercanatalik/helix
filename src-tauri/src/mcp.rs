@@ -600,10 +600,14 @@ async fn safe_list_tools(
         Ok(tools) => (
             tools
                 .into_iter()
-                .map(|t| McpToolInfo {
-                    name: t.name.to_string(),
-                    description: t.description.map(|d| d.to_string()),
-                    input_schema: serde_json::to_value(&t.input_schema).ok(),
+                .map(|t| {
+                    let tags = t.meta.as_ref().map(extract_tags).unwrap_or_default();
+                    McpToolInfo {
+                        name: t.name.to_string(),
+                        description: t.description.map(|d| d.to_string()),
+                        input_schema: serde_json::to_value(&t.input_schema).ok(),
+                        tags,
+                    }
                 })
                 .collect(),
             None,
@@ -614,6 +618,32 @@ async fn safe_list_tools(
             (Vec::new(), Some(msg))
         }
     }
+}
+
+/// Extract tag strings from a tool's `_meta` payload.
+///
+/// FastMCP namespaces tool tags under `_fastmcp.tags`; we also accept a
+/// top-level `tags` array for servers that publish them directly. Tag values
+/// must be strings; non-string entries are skipped.
+fn extract_tags(meta: &rmcp::model::Meta) -> Vec<String> {
+    let from_array = |value: &Value| -> Option<Vec<String>> {
+        value.as_array().map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+    };
+
+    if let Some(tags) = meta
+        .get("_fastmcp")
+        .and_then(|v| v.get("tags"))
+        .and_then(from_array)
+    {
+        return tags;
+    }
+
+    meta.get("tags").and_then(from_array).unwrap_or_default()
 }
 
 async fn safe_list_prompts(

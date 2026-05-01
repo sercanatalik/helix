@@ -1,22 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type OpenAI from "openai";
 import { buildExtraBody, createClient } from "../lib/llm/client";
+import type {
+  ChatMessage,
+  ChatTool,
+  ChatToolCall,
+} from "../lib/llm/types";
 import type { ProviderConfig } from "../features/providers";
 import type { ToolCallRecord, TranscriptMessage } from "../app/types";
-
-type ChatMessageParam = OpenAI.Chat.Completions.ChatCompletionMessageParam;
-type ChatTool = OpenAI.Chat.Completions.ChatCompletionTool;
-type ChatToolMessage =
-  OpenAI.Chat.Completions.ChatCompletionToolMessageParam;
-type AssistantMessage =
-  OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam;
 
 /** Maximum tool-call iterations before we abandon the loop. Defends against
  * a misbehaving model that keeps re-issuing the same tool call without ever
  * emitting a final assistant message. */
 const MAX_TOOL_ITERATIONS = 8;
 
-/** OpenAI's function-name limit. Names also must match `[A-Za-z0-9_-]+`. */
+/** OpenAI's function-name limit. Names also must match `[A-Za-z0-9_-]+`.
+ * Kept as the lowest common denominator across providers we target. */
 const TOOL_NAME_MAX_LEN = 64;
 
 export interface McpToolBinding {
@@ -61,24 +59,24 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function toApiMessage(m: TranscriptMessage): ChatMessageParam {
+function toApiMessage(m: TranscriptMessage): ChatMessage {
   return { role: m.role, content: m.content };
 }
 
-/** Replace any character OpenAI doesn't allow in a function name with `_`,
+/** Replace any character that isn't allowed in a function name with `_`,
  * collapse runs, and trim leading / trailing underscores. */
-function sanitizeForOpenAi(s: string): string {
+function sanitizeToolName(s: string): string {
   return s.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
-/** Build the OpenAI tools array + reverse-lookup map for one send call.
+/** Build the tools array + reverse-lookup map for one send call.
  *
- * The naive `${serverId}__${toolName}` encoding blows OpenAI's 64-char
- * function-name limit because helix server ids are uuid-derived (~36 chars)
- * before any tool-name is appended. Instead, we mint a short alias per
- * unique server (`s0`, `s1`, …) for this send, prefix the tool name with
- * it, and stash the round-trip in a Map. The model still sees a readable
- * name — just `s0_read_file` instead of the raw `mcp_<uuid>__read_file`. */
+ * The naive `${serverId}__${toolName}` encoding blows the 64-char function-
+ * name limit because helix server ids are uuid-derived (~36 chars) before
+ * any tool-name is appended. Instead, we mint a short alias per unique
+ * server (`s0`, `s1`, …) for this send, prefix the tool name with it, and
+ * stash the round-trip in a Map. The model still sees a readable name —
+ * just `s0_read_file` instead of the raw `mcp_<uuid>__read_file`. */
 function buildToolPayload(bindings: readonly McpToolBinding[]): {
   tools: readonly ChatTool[];
   resolve: (modelName: string) => McpToolBinding | undefined;
@@ -94,7 +92,7 @@ function buildToolPayload(bindings: readonly McpToolBinding[]): {
       serverAlias.set(binding.serverId, alias);
     }
     const prefix = `${alias}_`;
-    const safeTool = sanitizeForOpenAi(binding.toolName) || "tool";
+    const safeTool = sanitizeToolName(binding.toolName) || "tool";
     // Truncate the tool portion so prefix + tool fits in 64 chars. Plenty
     // for any realistic tool name; the description carries the meaning.
     const room = TOOL_NAME_MAX_LEN - prefix.length;
@@ -277,7 +275,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
       // first (prompts / resources the user selected), then the visible
       // transcript. The transcript-side `messagesRef` never sees the system
       // context — it stays a property of this single send invocation.
-      const apiMessages: ChatMessageParam[] = [];
+      const apiMessages: ChatMessage[] = [];
       if (extras?.systemContext?.length) {
         for (const ctx of extras.systemContext) {
           if (ctx.trim().length > 0) {
@@ -308,12 +306,11 @@ export function useChat(options: UseChatOptions): UseChatResult {
         const harvestedCharts: string[] = [];
 
         for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
-          const stream = await client.chat.completions.create({
+          const stream = client.chatStream({
             model: provider.model,
             messages: apiMessages,
-            tools: tools.length > 0 ? (tools as ChatTool[]) : undefined,
+            tools: tools.length > 0 ? tools : undefined,
             tool_choice: tools.length > 0 ? "auto" : undefined,
-            stream: true,
             ...buildExtraBody(provider),
           });
 
@@ -325,16 +322,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
           for await (const chunk of stream) {
             const choice = chunk.choices[0];
             if (!choice) continue;
-            const delta = choice.delta as
-              | {
-                  content?: string | null;
-                  tool_calls?: ReadonlyArray<{
-                    index?: number;
-                    id?: string;
-                    function?: { name?: string; arguments?: string };
-                  }>;
-                }
-              | undefined;
+            const delta = choice.delta;
 
             if (delta?.tool_calls) {
               for (const tc of delta.tool_calls) {
@@ -387,19 +375,25 @@ export function useChat(options: UseChatOptions): UseChatResult {
             // Round-trip the assistant tool_calls + tool results without
             // touching the transcript. The user only sees the final
             // post-tool response.
-            const assistantTurn: AssistantMessage = {
+            const dispatched = toolCalls.map((tc) => {
+              const callId = tc.id || newId("call");
+              const payload: ChatToolCall = {
+                id: callId,
+                type: "function",
+                function: {
+                  name: tc.name,
+                  arguments: tc.arguments || "{}",
+                },
+              };
+              return { tc, callId, payload };
+            });
+            apiMessages.push({
               role: "assistant",
               content: acc || null,
-              tool_calls: toolCalls.map((tc) => ({
-                id: tc.id || newId("call"),
-                type: "function",
-                function: { name: tc.name, arguments: tc.arguments || "{}" },
-              })),
-            };
-            apiMessages.push(assistantTurn);
+              tool_calls: dispatched.map((d) => d.payload),
+            });
 
-            for (const tc of toolCalls) {
-              const callId = tc.id || newId("call");
+            for (const { tc, callId } of dispatched) {
               const binding = resolveTool(tc.name);
               const startedAt = performance.now();
               const { result: toolResult, isError } = await runToolCall(
@@ -425,7 +419,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
                 role: "tool",
                 tool_call_id: callId,
                 content: toolResult,
-              } satisfies ChatToolMessage);
+              });
             }
             // Loop back for the next iteration.
             continue;

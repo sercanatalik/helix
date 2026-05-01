@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
-import { APIError } from "openai";
 import { KeyValueList } from "./key-value-list";
 import { Button } from "../../components/ui";
 import { buildExtraBody, createClient } from "../../lib/llm/client";
+import { LLMError } from "../../lib/llm/errors";
 import {
   AUTH_MODE_LABELS,
   type AuthMode,
@@ -29,20 +29,20 @@ type TestState =
   | ({ kind: "fail" } & TestFailure);
 
 function extractFailure(err: unknown, requestUrl?: string): TestFailure {
-  if (err instanceof APIError) {
-    const body = (err as { error?: unknown }).error;
+  if (err instanceof LLMError) {
+    const body = err.body;
     const inner = isRecord(body) ? body : undefined;
     const cause = (err as { cause?: unknown }).cause;
-    // For APIConnectionError there's no parsed response body — the only
-    // useful detail is the wrapped fetch error sitting in `cause`.
+    // Connection failures land here with body===undefined — the only useful
+    // detail is the wrapped fetch error sitting in `cause`.
     const detail = body !== undefined && body !== null ? body : cause;
     return {
       status: err.status,
-      code: typeof err.code === "string" ? err.code : undefined,
-      type: typeof err.type === "string" ? err.type : pickString(inner, "type"),
+      code: err.code,
+      type: err.type ?? pickString(inner, "type"),
       message: pickString(inner, "message") ?? err.message,
       body: describeError(detail),
-      requestUrl,
+      requestUrl: err.url ?? requestUrl,
     };
   }
   if (err instanceof Error) {
@@ -183,11 +183,10 @@ export function ProviderForm({
     setTestState({ kind: "testing" });
     try {
       const client = createClient(cleaned);
-      const r = await client.chat.completions.create({
+      const r = await client.chat({
         model: cleaned.model,
         messages: [{ role: "user", content: "ping" }],
         max_tokens: 1,
-        stream: false,
         ...buildExtraBody(cleaned),
       });
       setTestState({ kind: "ok", modelEcho: r.model });

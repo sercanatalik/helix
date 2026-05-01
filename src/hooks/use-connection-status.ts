@@ -32,12 +32,11 @@ export function useConnectionStatus(
     (async () => {
       try {
         const client = createClient(provider);
-        const r = await client.chat.completions.create(
+        const r = await client.chat(
           {
             model: provider.model!,
             messages: [{ role: "user", content: "ping" }],
             max_tokens: 1,
-            stream: false,
             ...buildExtraBody(provider),
           },
           { signal: controller.signal },

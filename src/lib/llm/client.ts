@@ -1,22 +1,37 @@
-import OpenAI from "openai";
+/* helix-ai · LLM HTTP client.
+ *
+ * A tiny client for OpenAI-compatible `/chat/completions` endpoints. We don't
+ * pull in any vendor SDK — everything any of our supported providers (OpenAI,
+ * Anthropic via Messages-compatible proxies, LiteLLM, Groq, Mistral, Together,
+ * Cohere, Ollama) actually needs is a JSON POST that may stream back as SSE.
+ *
+ * The Tauri HTTP plugin routes through the Rust reqwest stack, which bypasses
+ * the WebView's CORS policy and surfaces real network errors instead of
+ * WKWebView's opaque "Load failed". When running in a non-Tauri context
+ * (vite dev with no native shell), we fall back to globalThis.fetch. */
+
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import type { ProviderConfig } from "../../features/providers";
+import { LLMError } from "./errors";
+import { parseSSEStream } from "./stream";
+import type {
+  ChatCompletion,
+  ChatCompletionChunk,
+  ChatCompletionRequest,
+} from "./types";
 
-// Tauri's fetch routes through the Rust HTTP client (reqwest), bypassing the
-// WebView's CORS policy and surfacing real network errors instead of
-// WKWebView's opaque "Load failed". When running in a non-Tauri context
-// (vite dev with no native shell), fall back to globalThis.fetch.
 const httpFetch: typeof globalThis.fetch =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
     ? (tauriFetch as typeof globalThis.fetch)
     : globalThis.fetch.bind(globalThis);
 
-// Translate ProviderConfig.auth into the headers the OpenAI SDK should send
-// on every request. The SDK's own `apiKey` only emits `Authorization: Bearer`,
-// which doesn't fit providers like Anthropic (`x-api-key: {key}`) — so we
-// always compose the auth header ourselves and pass a placeholder apiKey.
+/** Translate ProviderConfig.auth into the headers each request should send.
+ * The OpenAI SDK could only emit `Authorization: Bearer`; doing this ourselves
+ * lets providers like Anthropic use `x-api-key: {key}` straightforwardly. */
 function buildHeaders(provider: ProviderConfig): Record<string, string> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   for (const { key, value } of provider.extraHeaders) {
     if (key.trim()) headers[key] = value;
   }
@@ -34,21 +49,10 @@ function buildHeaders(provider: ProviderConfig): Record<string, string> {
       headers.Authorization = `Basic ${btoa(`${auth.username}:${auth.password}`)}`;
       break;
     case "api_key_body":
-      // Body-injected auth must be merged into the request body by the
-      // caller; nothing to set as a header here.
+      // Body-injected auth is merged by buildExtraBody; no header to set.
       break;
   }
   return headers;
-}
-
-export function createClient(provider: ProviderConfig): OpenAI {
-  return new OpenAI({
-    baseURL: provider.baseUrl,
-    apiKey: "placeholder",
-    dangerouslyAllowBrowser: true,
-    defaultHeaders: buildHeaders(provider),
-    fetch: httpFetch,
-  });
 }
 
 /** Body fields a caller must merge into the chat completion request to honour
@@ -64,4 +68,144 @@ export function buildExtraBody(
     body[provider.auth.bodyKey] = provider.auth.apiKey;
   }
   return body;
+}
+
+function joinUrl(base: string, path: string): string {
+  return `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+export interface RequestOptions {
+  readonly signal?: AbortSignal;
+}
+
+export interface LLMClient {
+  /** One-shot completion. Throws LLMError on transport or HTTP failure. */
+  chat(
+    request: ChatCompletionRequest,
+    opts?: RequestOptions,
+  ): Promise<ChatCompletion>;
+  /** Streaming completion. Returns an async iterable of SSE chunks; the
+   * iterator finishes when the provider sends `data: [DONE]` or closes. */
+  chatStream(
+    request: ChatCompletionRequest,
+    opts?: RequestOptions,
+  ): AsyncIterable<ChatCompletionChunk>;
+}
+
+export function createClient(provider: ProviderConfig): LLMClient {
+  const url = joinUrl(provider.baseUrl, "/chat/completions");
+  const baseHeaders = buildHeaders(provider);
+
+  return {
+    async chat(request, opts) {
+      const response = await sendRequest(url, baseHeaders, request, false, opts);
+      try {
+        return (await response.json()) as ChatCompletion;
+      } catch (err) {
+        throw new LLMError({
+          message: `Could not parse response JSON: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          url,
+          cause: err,
+        });
+      }
+    },
+
+    chatStream(request, opts) {
+      // Defer the request until the consumer starts iterating so the AbortSignal
+      // semantics line up with for-await usage in callers.
+      return streamCompletions(url, baseHeaders, request, opts);
+    },
+  };
+}
+
+async function sendRequest(
+  url: string,
+  baseHeaders: Record<string, string>,
+  request: ChatCompletionRequest,
+  stream: boolean,
+  opts?: RequestOptions,
+): Promise<Response> {
+  const headers: Record<string, string> = { ...baseHeaders };
+  headers.Accept = stream ? "text/event-stream" : "application/json";
+  const body = JSON.stringify({ ...request, stream });
+
+  let response: Response;
+  try {
+    response = await httpFetch(url, {
+      method: "POST",
+      headers,
+      body,
+      signal: opts?.signal,
+    });
+  } catch (err) {
+    if (opts?.signal?.aborted) {
+      throw err;
+    }
+    throw new LLMError({
+      message: `Connection error: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      url,
+      cause: err,
+    });
+  }
+
+  if (!response.ok) {
+    throw await buildHttpError(response, url);
+  }
+  return response;
+}
+
+async function buildHttpError(response: Response, url: string): Promise<LLMError> {
+  const text = await response.text().catch(() => "");
+  let parsed: unknown = text || undefined;
+  let detailMessage: string | undefined;
+  let code: string | undefined;
+  let type: string | undefined;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+      const errObj = (parsed as { error?: unknown }).error;
+      if (errObj && typeof errObj === "object") {
+        const e = errObj as Record<string, unknown>;
+        if (typeof e.message === "string") detailMessage = e.message;
+        if (typeof e.code === "string") code = e.code;
+        if (typeof e.type === "string") type = e.type;
+      } else if (typeof (parsed as { message?: unknown }).message === "string") {
+        detailMessage = (parsed as { message: string }).message;
+      }
+    } catch {
+      // Body wasn't JSON — keep the raw text on .body.
+    }
+  }
+  const fallback =
+    `HTTP ${response.status}` +
+    (response.statusText ? ` ${response.statusText}` : "");
+  return new LLMError({
+    message: detailMessage || fallback,
+    status: response.status,
+    statusText: response.statusText,
+    code,
+    type,
+    body: parsed,
+    url,
+  });
+}
+
+async function* streamCompletions(
+  url: string,
+  baseHeaders: Record<string, string>,
+  request: ChatCompletionRequest,
+  opts?: RequestOptions,
+): AsyncGenerator<ChatCompletionChunk, void, void> {
+  const response = await sendRequest(url, baseHeaders, request, true, opts);
+  if (!response.body) {
+    throw new LLMError({
+      message: "Streaming response has no readable body.",
+      url,
+    });
+  }
+  yield* parseSSEStream(response.body);
 }

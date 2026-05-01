@@ -1,7 +1,8 @@
 use crate::mcp::{CallToolOutcome, McpManager, McpTestResult};
+use crate::skills::{self, SkillsManager};
 use crate::types::{
     AppView, DesktopAppState, McpPromptResult, McpResourceResult, McpServerConfig, McpServerInput,
-    McpServerPatch, ThemeId,
+    McpServerPatch, Skill, ThemeId,
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -22,6 +23,11 @@ pub type SharedState = Mutex<DesktopAppState>;
 /// manager pushes runtime updates back into `DesktopAppState.mcp_runtime` via
 /// the `on_change` callback installed in `lib.rs`.
 pub type SharedMcp = Arc<McpManager>;
+
+/// The skills manager — owns filesystem watchers for `~/.claude/skills` and
+/// the active workspace's `.claude/skills`, re-scanning on every change so
+/// `DesktopAppState.skills` stays in sync with on-disk SKILL.md files.
+pub type SharedSkills = Arc<SkillsManager>;
 
 #[tauri::command]
 pub fn ping() -> &'static str {
@@ -476,6 +482,68 @@ pub async fn call_mcp_tool(
     mcp: State<'_, SharedMcp>,
 ) -> Result<CallToolOutcome, String> {
     Ok(mcp.inner().call_tool(&server_id, &tool_name, args).await)
+}
+
+// -- Skills --------------------------------------------------------------
+
+/// Switch the project skills root being watched. Pass `None` (or an empty
+/// string) when no workspace is active; pass the workspace's absolute path
+/// otherwise. Triggers an immediate rescan; the resulting skills list is
+/// pushed back synchronously via the `SkillsManager` on_change callback,
+/// so the snapshot we return already reflects it.
+#[tauri::command]
+pub fn set_skills_workspace(
+    workspace: Option<String>,
+    state: State<'_, SharedState>,
+    skills_state: State<'_, SharedSkills>,
+) -> DesktopAppState {
+    let path = workspace.and_then(|p| {
+        let trimmed = p.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(trimmed))
+        }
+    });
+    skills_state.inner().set_workspace(path);
+    state.lock().expect("state poisoned").clone()
+}
+
+/// Force a manual rescan. Useful for a "Refresh" button in the skills pane
+/// or when the user creates `.claude/skills/` for the first time (the
+/// watcher won't have fired since the directory didn't exist when the
+/// manager started).
+#[tauri::command]
+pub fn reload_skills(
+    state: State<'_, SharedState>,
+    skills_state: State<'_, SharedSkills>,
+) -> DesktopAppState {
+    skills_state.inner().rescan();
+    state.lock().expect("state poisoned").clone()
+}
+
+/// Render a skill into the string the frontend should send as a hidden
+/// system message. Substitutes the user-supplied argument string into the
+/// SKILL.md body following Claude Code's substitution rules
+/// (`$ARGUMENTS`, `$ARGUMENTS[N]`, `$N`, named placeholders).
+#[tauri::command]
+pub fn render_skill(
+    skill_id: String,
+    arguments: Option<String>,
+    state: State<'_, SharedState>,
+) -> Result<String, String> {
+    let guard = state.lock().expect("state poisoned");
+    let skill: &Skill = guard
+        .skills
+        .iter()
+        .find(|s| s.id == skill_id)
+        .ok_or_else(|| format!("unknown skill id: {skill_id}"))?;
+    if let Some(err) = &skill.error {
+        return Err(format!("skill {skill_id} is broken: {err}"));
+    }
+    let raw = arguments.unwrap_or_default();
+    let named = skill.arguments.clone().unwrap_or_default();
+    Ok(skills::substitute_arguments(&skill.body, &raw, &named))
 }
 
 /// One-shot connection test against the supplied server input. Spawns a

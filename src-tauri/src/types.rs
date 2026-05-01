@@ -259,6 +259,75 @@ pub struct McpResourceResult {
     pub error: Option<String>,
 }
 
+// -- Skills (Claude Desktop / Claude Code parity) ---------------------------
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillSource {
+    /// Loaded from `~/.claude/skills/`. Available across all workspaces.
+    User,
+    /// Loaded from `<workspace>/.claude/skills/`. Project-scoped; takes
+    /// precedence over a same-named user skill.
+    Project,
+}
+
+/// Parsed YAML frontmatter from a `SKILL.md`. Internal — gets folded into
+/// the public `Skill` struct so the wire format is flat.
+#[derive(Clone, Debug, Default)]
+pub struct SkillFrontmatter {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub when_to_use: Option<String>,
+    pub argument_hint: Option<String>,
+    pub arguments: Option<Vec<String>>,
+    pub disable_model_invocation: Option<bool>,
+    pub user_invocable: Option<bool>,
+    pub allowed_tools: Option<Vec<String>>,
+    pub paths: Option<Vec<String>>,
+}
+
+/// A skill discovered on disk — wire-shape mirrors what Claude Code's
+/// frontmatter exposes plus a few helix-specific fields (`id`, `source`,
+/// `error`) the UI needs to render the skills list.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Skill {
+    /// Stable id derived from `<source>::<directory-name>`. Survives reloads
+    /// so the frontend can keep selection / pending-invocation state across
+    /// filesystem refreshes.
+    pub id: String,
+    /// Display name. Frontmatter `name` if present, otherwise the directory
+    /// name (matches Claude Code's fallback rules).
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub when_to_use: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub argument_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub arguments: Option<Vec<String>>,
+    pub disable_model_invocation: bool,
+    pub user_invocable: bool,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub paths: Option<Vec<String>>,
+    /// The markdown content following the frontmatter. Pre-loaded so the
+    /// frontend can invoke a skill without a follow-up round-trip.
+    pub body: String,
+    pub source: SkillSource,
+    /// Absolute path of the skill folder.
+    pub directory: String,
+    /// Absolute path of the `SKILL.md` file. Useful for "Open in editor".
+    pub skill_md_path: String,
+    /// Populated when frontmatter parsing or file reading failed. The skill
+    /// still appears in the list so the user can fix it; `body` is empty in
+    /// that case.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopAppState {
@@ -271,4 +340,7 @@ pub struct DesktopAppState {
     pub active_view: AppView,
     pub mcp_servers: Vec<McpServerConfig>,
     pub mcp_runtime: HashMap<String, McpServerRuntime>,
+    /// Skills discovered under `~/.claude/skills` and the active
+    /// workspace's `.claude/skills`. Live-updated as files change on disk.
+    pub skills: Vec<Skill>,
 }

@@ -51,6 +51,9 @@ export interface McpToolInfo {
    * top-level `tags` array on the tool's `_meta`). Empty / absent when the
    * server does not publish any. */
   readonly tags?: readonly string[];
+  /** The full `_meta` payload as advertised by the server, passed through
+   * verbatim. FastMCP namespaces extras under keys like `_fastmcp`. */
+  readonly meta?: Readonly<Record<string, unknown>>;
 }
 
 export interface McpPromptInfo {
@@ -61,6 +64,8 @@ export interface McpPromptInfo {
     readonly description?: string;
     readonly required?: boolean;
   }>;
+  readonly tags?: readonly string[];
+  readonly meta?: Readonly<Record<string, unknown>>;
 }
 
 export interface McpResourceInfo {
@@ -68,6 +73,8 @@ export interface McpResourceInfo {
   readonly name?: string;
   readonly description?: string;
   readonly mimeType?: string;
+  readonly tags?: readonly string[];
+  readonly meta?: Readonly<Record<string, unknown>>;
 }
 
 export interface McpServerRuntime {

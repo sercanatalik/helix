@@ -601,12 +601,13 @@ async fn safe_list_tools(
             tools
                 .into_iter()
                 .map(|t| {
-                    let tags = t.meta.as_ref().map(extract_tags).unwrap_or_default();
+                    let (tags, meta) = split_meta(t.meta.as_ref());
                     McpToolInfo {
                         name: t.name.to_string(),
                         description: t.description.map(|d| d.to_string()),
                         input_schema: serde_json::to_value(&t.input_schema).ok(),
                         tags,
+                        meta,
                     }
                 })
                 .collect(),
@@ -620,12 +621,14 @@ async fn safe_list_tools(
     }
 }
 
-/// Extract tag strings from a tool's `_meta` payload.
-///
-/// FastMCP namespaces tool tags under `_fastmcp.tags`; we also accept a
-/// top-level `tags` array for servers that publish them directly. Tag values
-/// must be strings; non-string entries are skipped.
-fn extract_tags(meta: &rmcp::model::Meta) -> Vec<String> {
+/// Split a `_meta` payload into the convenience `tags` array and the full
+/// passthrough JSON. FastMCP namespaces tags under `_fastmcp.tags`; we also
+/// accept a top-level `tags` array for servers that publish them directly.
+/// Tag values must be strings; non-string entries are skipped.
+fn split_meta(meta: Option<&rmcp::model::Meta>) -> (Vec<String>, Option<Value>) {
+    let Some(meta) = meta else {
+        return (Vec::new(), None);
+    };
     let from_array = |value: &Value| -> Option<Vec<String>> {
         value.as_array().map(|items| {
             items
@@ -634,16 +637,13 @@ fn extract_tags(meta: &rmcp::model::Meta) -> Vec<String> {
                 .collect()
         })
     };
-
-    if let Some(tags) = meta
+    let tags = meta
         .get("_fastmcp")
         .and_then(|v| v.get("tags"))
         .and_then(from_array)
-    {
-        return tags;
-    }
-
-    meta.get("tags").and_then(from_array).unwrap_or_default()
+        .or_else(|| meta.get("tags").and_then(from_array))
+        .unwrap_or_default();
+    (tags, Some(Value::Object(meta.0.clone())))
 }
 
 async fn safe_list_prompts(
@@ -653,18 +653,23 @@ async fn safe_list_prompts(
         Ok(prompts) => (
             prompts
                 .into_iter()
-                .map(|p| McpPromptInfo {
-                    name: p.name,
-                    description: p.description,
-                    arguments: p.arguments.map(|args| {
-                        args.into_iter()
-                            .map(|a| McpPromptArg {
-                                name: a.name,
-                                description: a.description,
-                                required: a.required,
-                            })
-                            .collect()
-                    }),
+                .map(|p| {
+                    let (tags, meta) = split_meta(p.meta.as_ref());
+                    McpPromptInfo {
+                        name: p.name,
+                        description: p.description,
+                        arguments: p.arguments.map(|args| {
+                            args.into_iter()
+                                .map(|a| McpPromptArg {
+                                    name: a.name,
+                                    description: a.description,
+                                    required: a.required,
+                                })
+                                .collect()
+                        }),
+                        tags,
+                        meta,
+                    }
                 })
                 .collect(),
             None,
@@ -684,11 +689,16 @@ async fn safe_list_resources(
         Ok(resources) => (
             resources
                 .into_iter()
-                .map(|r| McpResourceInfo {
-                    uri: r.uri.clone(),
-                    name: Some(r.name.clone()),
-                    description: r.description.clone(),
-                    mime_type: r.mime_type.clone(),
+                .map(|r| {
+                    let (tags, meta) = split_meta(r.meta.as_ref());
+                    McpResourceInfo {
+                        uri: r.uri.clone(),
+                        name: Some(r.name.clone()),
+                        description: r.description.clone(),
+                        mime_type: r.mime_type.clone(),
+                        tags,
+                        meta,
+                    }
                 })
                 .collect(),
             None,

@@ -1,6 +1,7 @@
 import { useState, type ComponentType } from "react";
 import { ProvidersPane } from "../providers";
 import { McpPane } from "../../components/mcp-pane";
+import { SkillsPane } from "../../components/skills-pane";
 import { AppearancePane } from "./appearance";
 import { GeneralPane } from "./general";
 
@@ -10,12 +11,13 @@ interface SettingsPane {
   readonly Component: ComponentType;
 }
 
-// Registry of settings panes. New features (skills, …) register their own
-// pane here without touching the settings shell.
+// Registry of settings panes. New features register their own pane here
+// without touching the settings shell.
 const PANES: readonly SettingsPane[] = [
   { id: "appearance", label: "Appearance", Component: AppearancePane },
   { id: "providers", label: "Providers", Component: ProvidersPane },
   { id: "mcp", label: "MCP", Component: McpPane },
+  { id: "skills", label: "Skills", Component: SkillsPane },
   { id: "general", label: "General", Component: GeneralPane },
 ];
 

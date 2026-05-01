@@ -1,9 +1,10 @@
 mod commands;
 mod mcp;
 mod mcp_defaults;
+mod skills;
 mod types;
 
-use commands::{SharedMcp, SharedState, WatcherState};
+use commands::{SharedMcp, SharedSkills, SharedState, WatcherState};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{App, Emitter, Manager};
@@ -119,6 +120,31 @@ pub fn run() {
                 });
             }
 
+            // -- Skills -------------------------------------------------
+            //
+            // Claude Desktop / Claude Code parity: scan ~/.claude/skills
+            // and the active workspace's .claude/skills, watch for live
+            // changes, and emit snapshots so the UI updates without a
+            // round-trip.
+            let app_handle_skills = app.handle().clone();
+            let skills_manager = skills::SkillsManager::new(move |skills_list| {
+                let Some(state) = app_handle_skills.try_state::<SharedState>() else {
+                    return;
+                };
+                let snapshot = {
+                    let mut guard = state.lock().expect("state poisoned");
+                    guard.skills = skills_list;
+                    guard.clone()
+                };
+                let _ = app_handle_skills.emit(STATE_CHANGED_EVENT, &snapshot);
+            });
+            app.manage::<SharedSkills>(skills_manager.clone());
+            // Watch the user-level dir up front; project-level gets wired
+            // when the frontend calls `set_skills_workspace`. An initial
+            // rescan populates the state with whatever's already on disk.
+            skills_manager.watch_user_root();
+            skills_manager.rescan();
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -149,6 +175,9 @@ pub fn run() {
             commands::read_mcp_resource,
             commands::call_mcp_tool,
             commands::test_mcp_server,
+            commands::set_skills_workspace,
+            commands::reload_skills,
+            commands::render_skill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

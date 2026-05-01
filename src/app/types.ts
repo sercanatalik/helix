@@ -179,6 +179,43 @@ export interface SessionRecord {
 
 export type SessionKey = `${WorkspaceId}::${SessionId}`;
 
+/** Where a skill came from. Mirrors Claude Code's precedence model: project
+ * skills override personal ones with the same directory name. */
+export type SkillSource = "user" | "project";
+
+/** A skill discovered on disk under either `~/.claude/skills/<name>/SKILL.md`
+ * or `<workspace>/.claude/skills/<name>/SKILL.md`. The wire shape mirrors
+ * Claude Code's frontmatter fields plus a few helix-specific fields used for
+ * UI state (`id`, `source`, `error`). */
+export interface Skill {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly whenToUse?: string;
+  readonly argumentHint?: string;
+  /** Names of declared positional arguments. Used for `$name` substitution
+   * inside the skill body. */
+  readonly arguments?: readonly string[];
+  /** When true, only the user can invoke the skill via `/name`. The model
+   * never auto-discovers it. */
+  readonly disableModelInvocation: boolean;
+  /** When false, the skill is hidden from the slash menu — used for
+   * background-knowledge skills the model should know about but the user
+   * shouldn't run directly. */
+  readonly userInvocable: boolean;
+  readonly allowedTools?: readonly string[];
+  readonly paths?: readonly string[];
+  /** The markdown body following the frontmatter. Pre-loaded so invocation
+   * doesn't require a follow-up read; used by the rendered system message. */
+  readonly body: string;
+  readonly source: SkillSource;
+  readonly directory: string;
+  readonly skillMdPath: string;
+  /** Set when frontmatter parsing or file reading failed. The skill still
+   * shows up in the list so the user can see what's broken. */
+  readonly error?: string;
+}
+
 export interface DesktopAppState {
   readonly workspaces: readonly WorkspaceRecord[];
   readonly selectedWorkspaceId?: WorkspaceId;
@@ -190,6 +227,7 @@ export interface DesktopAppState {
   readonly activeView: AppView;
   readonly mcpServers: readonly McpServerConfig[];
   readonly mcpRuntime: Readonly<Record<string, McpServerRuntime>>;
+  readonly skills: readonly Skill[];
 }
 
 export function sessionKey(
@@ -208,5 +246,6 @@ export function createEmptyState(): DesktopAppState {
     activeView: "chat",
     mcpServers: [],
     mcpRuntime: {},
+    skills: [],
   };
 }

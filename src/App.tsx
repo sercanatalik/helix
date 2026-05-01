@@ -66,6 +66,20 @@ export function App() {
     return window.helixApi.onStateChanged(setState);
   }, []);
 
+  // Keep the project skills root in sync with the active workspace. The
+  // Rust SkillsManager already watches `~/.claude/skills`; this call
+  // (re)attaches the project-level watcher whenever the user switches
+  // workspaces. Empty/missing path falls back to user-level only.
+  useEffect(() => {
+    const path = workspacesApi.activeWorkspace?.path;
+    void window.helixApi
+      .setSkillsWorkspace(path && path.length > 0 ? path : undefined)
+      .then(setState)
+      .catch(() => {
+        // Backend not ready yet — push will arrive on the next snapshot.
+      });
+  }, [workspacesApi.activeWorkspace?.path]);
+
   useEffect(() => {
     function handler(event: KeyboardEvent) {
       const mod = event.metaKey || event.ctrlKey;

@@ -47,6 +47,10 @@ export interface McpToolInfo {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema?: unknown;
+  /** Tags advertised by the server (FastMCP `_meta._fastmcp.tags`, or a
+   * top-level `tags` array on the tool's `_meta`). Empty / absent when the
+   * server does not publish any. */
+  readonly tags?: readonly string[];
 }
 
 export interface McpPromptInfo {

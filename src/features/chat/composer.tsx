@@ -616,6 +616,11 @@ function McpDiscoveryPopover({
           groups={groups as readonly ServerGroup<McpToolInfo>[]}
           onToggleTool={onToggleTool}
         />
+      ) : kind === "prompts" ? (
+        <PromptsByTag
+          groups={groups as readonly ServerGroup<McpPromptInfo>[]}
+          onTogglePrompt={onTogglePrompt}
+        />
       ) : (
         <div className="mcp-menu-groups">
           {groups.map((group) => (
@@ -751,31 +756,33 @@ function ToolItem({
 
 const UNTAGGED = "Untagged";
 
-interface TagBucket {
+interface TagBucket<T> {
   readonly tag: string;
   readonly entries: ReadonlyArray<{
     readonly server: McpServerConfig;
-    readonly tool: McpToolInfo;
+    readonly item: T;
   }>;
 }
 
-/** Bucket every (server, tool) pair under each of its tags. A tool with N
- * tags appears in N buckets; a tool with no tags lands in `Untagged`. Tag
+/** Bucket every (server, item) pair under each of its tags. An item with N
+ * tags appears in N buckets; an item with no tags lands in `Untagged`. Tag
  * buckets are sorted alphabetically with `Untagged` last. */
-function bucketToolsByTag(
-  groups: readonly ServerGroup<McpToolInfo>[],
-): readonly TagBucket[] {
-  const buckets = new Map<string, Array<{ server: McpServerConfig; tool: McpToolInfo }>>();
+function bucketByTag<T>(
+  groups: readonly ServerGroup<T>[],
+  getTags: (item: T) => readonly string[] | undefined,
+): readonly TagBucket<T>[] {
+  const buckets = new Map<string, Array<{ server: McpServerConfig; item: T }>>();
   for (const group of groups) {
-    for (const tool of group.items) {
-      const tags = tool.tags && tool.tags.length > 0 ? tool.tags : [UNTAGGED];
+    for (const item of group.items) {
+      const t = getTags(item);
+      const tags = t && t.length > 0 ? t : [UNTAGGED];
       for (const tag of tags) {
         let list = buckets.get(tag);
         if (!list) {
           list = [];
           buckets.set(tag, list);
         }
-        list.push({ server: group.server, tool });
+        list.push({ server: group.server, item });
       }
     }
   }
@@ -799,7 +806,10 @@ function ToolsByTag({
     nextEnabled: boolean,
   ) => void;
 }) {
-  const buckets = useMemo(() => bucketToolsByTag(groups), [groups]);
+  const buckets = useMemo(
+    () => bucketByTag(groups, (t) => t.tags),
+    [groups],
+  );
   const errored = groups.filter((g) => g.listError);
   return (
     <div className="mcp-menu-groups">
@@ -815,13 +825,59 @@ function ToolsByTag({
             <span className="mcp-menu-section-count">{entries.length}</span>
           </div>
           <ul className="mcp-menu-items">
-            {entries.map(({ server, tool }) => (
+            {entries.map(({ server, item }) => (
               <ToolItem
-                key={`${server.id}::${tool.name}`}
+                key={`${server.id}::${item.name}`}
                 server={server}
-                tool={tool}
+                tool={item}
                 showServerName
                 onToggle={onToggleTool}
+              />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function PromptsByTag({
+  groups,
+  onTogglePrompt,
+}: {
+  readonly groups: readonly ServerGroup<McpPromptInfo>[];
+  readonly onTogglePrompt: (
+    serverId: string,
+    promptName: string,
+    nextEnabled: boolean,
+  ) => void;
+}) {
+  const buckets = useMemo(
+    () => bucketByTag(groups, (p) => p.tags),
+    [groups],
+  );
+  const errored = groups.filter((g) => g.listError);
+  return (
+    <div className="mcp-menu-groups">
+      {errored.map((g) => (
+        <p key={g.server.id} className="mcp-menu-section-error">
+          <strong>{g.server.name} · prompts/list</strong>: {g.listError}
+        </p>
+      ))}
+      {buckets.map(({ tag, entries }) => (
+        <section key={tag} className="mcp-menu-section">
+          <div className="mcp-menu-section-head">
+            <span className="mcp-menu-section-name">{tag}</span>
+            <span className="mcp-menu-section-count">{entries.length}</span>
+          </div>
+          <ul className="mcp-menu-items">
+            {entries.map(({ server, item }) => (
+              <PromptItem
+                key={`${server.id}::${item.name}`}
+                server={server}
+                prompt={item}
+                showServerName
+                onToggle={onTogglePrompt}
               />
             ))}
           </ul>
@@ -834,10 +890,15 @@ function ToolsByTag({
 function PromptItem({
   server,
   prompt,
+  showServerName = false,
   onToggle,
 }: {
   readonly server: McpServerConfig;
   readonly prompt: McpPromptInfo;
+  /** When the surrounding section isn't already scoped to one server (e.g.
+   * the tag-grouped view), prefix the prompt name with its server so
+   * duplicate prompt names across servers stay distinguishable. */
+  readonly showServerName?: boolean;
   readonly onToggle: (
     serverId: string,
     promptName: string,
@@ -854,6 +915,9 @@ function PromptItem({
           ariaLabel={`Inject prompt ${prompt.name} as hidden context`}
         />
         <span className="mcp-menu-toggle-label">
+          {showServerName ? (
+            <span className="mcp-menu-item-server">{server.name}·</span>
+          ) : null}
           <code className="mcp-menu-item-name">{prompt.name}</code>
           {prompt.description ? (
             <>

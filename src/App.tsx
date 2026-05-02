@@ -238,6 +238,17 @@ function ChatView({
     setContextResetAt(id, new Date().toISOString());
   }, [setContextResetAt]);
 
+  // Hard reset: wipe the visible transcript and clear `contextResetAt`
+  // (no leftover divider over an empty list). Used by `/clear` and the
+  // built-in `clear` tool. Distinct from the soft reset above, which the
+  // context-usage chip uses to free model context without losing scrollback.
+  const onClearTranscript = useCallback(() => {
+    const id = activeIdRef.current;
+    if (!id) return;
+    setMessages(id, []);
+    setContextResetAt(id, undefined);
+  }, [setMessages, setContextResetAt]);
+
   const { isStreaming, error, send, stop } = useChat({
     provider: activeProvider,
     messages,
@@ -273,6 +284,8 @@ function ChatView({
         messages={messages}
         contextResetAt={contextResetAt}
         onResetContext={onResetContext}
+        onClearTranscript={onClearTranscript}
+        workspacePath={activeWorkspace?.path || undefined}
       />
     </>
   );

@@ -15,8 +15,11 @@ import type { ProviderConfig } from "../../features/providers";
 import {
   BUILTIN_GROUP_LABEL,
   BUILTIN_SERVER_ID,
+  BUILTIN_SLASH_COMMANDS,
+  type BuiltinSlashCommand,
   type BuiltinToolDef,
   type BuiltinToolGroup,
+  setBuiltinUiHandlers,
   useBuiltinTools,
 } from "../../lib/builtin-tools";
 import {
@@ -62,6 +65,14 @@ interface ComposerProps {
   /** Reset the conversation's model-side context. Triggered by clicking the
    * context-usage chip. The visible transcript is left intact. */
   readonly onResetContext?: () => void;
+  /** Hard reset: wipe the visible transcript AND drop model-side context.
+   * Triggered by `/clear` or the built-in `clear` tool. */
+  readonly onClearTranscript?: () => void;
+  /** Active workspace's attached folder, when one is set. Forwarded into
+   * the built-in tool dispatcher so relative paths in tool calls land
+   * inside it, and surfaced as a system-context entry on each send so the
+   * model knows where it is. */
+  readonly workspacePath?: string;
 }
 
 /** A prompt or resource the user has loaded into context for the next
@@ -95,6 +106,8 @@ export function Composer({
   messages,
   contextResetAt,
   onResetContext,
+  onClearTranscript,
+  workspacePath,
 }: ComposerProps) {
   const [text, setText] = useState("");
   const [open, setOpen] = useState<boolean>(false);
@@ -126,16 +139,17 @@ export function Composer({
   const { skills, render: renderSkill } = useSkills();
   const builtinTools = useBuiltinTools();
 
-  // Slash-command parser. The user types `/skill-name args…`; we open a
-  // filterable popover as soon as the textarea opens with `/` so they can
-  // pick an entry without typing the full name. `null` means no menu.
+  // Slash-command parser. The user types `/skill-name args…` or
+  // `/builtin-command`; we open a filterable popover as soon as the
+  // textarea opens with `/` so they can pick an entry without typing
+  // the full name. `null` means no menu.
   const slash = useMemo<SlashState | null>(
-    () => parseSlash(text, skills),
+    () => parseSlash(text, skills, BUILTIN_SLASH_COMMANDS),
     [text, skills],
   );
   // Highlight index for keyboard navigation within the slash popover.
   const [slashHighlight, setSlashHighlight] = useState(0);
-  const slashCandidates = slash?.candidates ?? EMPTY_SKILL_LIST;
+  const slashCandidates = slash?.candidates ?? EMPTY_SLASH_ITEMS;
   // Snap the highlight back to the first row whenever the candidate set
   // changes — easier than threading the index through `parseSlash`.
   useEffect(() => {
@@ -174,6 +188,22 @@ export function Composer({
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [builtinOpen]);
+
+  // Register the React-side clear handler and the active workspace folder
+  // so the built-in tool dispatcher can reach them. Module-level registry
+  // avoids threading these through the agent loop, which has no business
+  // knowing about UI affordances or the workspace concept.
+  useEffect(() => {
+    setBuiltinUiHandlers({
+      clearTranscript: onClearTranscript,
+      workspacePath,
+    });
+    return () =>
+      setBuiltinUiHandlers({
+        clearTranscript: undefined,
+        workspacePath: undefined,
+      });
+  }, [onClearTranscript, workspacePath]);
 
   /** Discoverable skills shown to the model on every send. Mirrors Claude
    * Desktop's "metadata always pre-loaded" behaviour: name + description
@@ -388,6 +418,17 @@ export function Composer({
   }, [groups.tools, builtinTools]);
 
   async function submit() {
+    // `/clear` short-circuits the whole pipeline: drop the input, wipe
+    // the visible transcript, and don't ship anything to the provider.
+    // Checked before `canSend` so the user can clear even when no
+    // provider / model is configured. Trailing whitespace is tolerated
+    // so ⌫-then-↵ on a stray space still works.
+    if (text.trim().toLowerCase() === "/clear") {
+      setText("");
+      setPendingContext([]);
+      onClearTranscript?.();
+      return;
+    }
     if (!canSend) return;
     // Snapshot text + clear immediately so the textarea feels responsive
     // while we round-trip to MCP for prompt content.
@@ -403,13 +444,16 @@ export function Composer({
       renderSkill,
       discoverableSkills,
     );
+    const workspaceContext = buildWorkspaceContext(workspacePath);
 
     const extras: ChatExtras = {
-      // Persistent prompt context goes first so it grounds the rest of the
-      // turn; one-shot resources follow as additional context. Skill
-      // context comes last so the rendered SKILL.md body is the closest
-      // system message to the user's text — same ordering Claude Code uses.
+      // Workspace pin goes first so the model has the working directory
+      // grounded before any user-facing prompt or skill body renders.
+      // Persistent prompt context follows so it can lean on that pin;
+      // one-shot resources come next; the skill body sits closest to the
+      // user's text — same ordering Claude Code uses.
       systemContext: [
+        ...workspaceContext,
         ...promptContext,
         ...oneShotContext,
         ...skillContext,
@@ -420,12 +464,16 @@ export function Composer({
     onSend(userText, extras);
   }
 
-  /** Apply a skill the user picked from the slash popover. Replaces the
-   * current `/query` prefix with `/skill-name ` so they can immediately
-   * type arguments — same UX shape as Claude Code. */
-  const onPickSkill = useCallback(
-    (skill: Skill) => {
-      const next = `/${skill.name} `;
+  /** Apply an entry the user picked from the slash popover. Skills get
+   * a trailing space so the user can immediately type arguments — same
+   * UX shape as Claude Code. Built-in commands take no args, so we omit
+   * the space and the user just hits Enter to fire them. */
+  const onPickSlashItem = useCallback(
+    (item: SlashItem) => {
+      const next =
+        item.kind === "skill"
+          ? `/${item.skill.name} `
+          : `/${item.command.name}`;
       setText(next);
       setSlashHighlight(0);
       // Defer focus so the textarea picks up the new value first.
@@ -454,10 +502,17 @@ export function Composer({
         );
         return;
       }
-      if (e.key === "Tab") {
+      // Tab and Enter both insert the highlighted candidate (skills get a
+      // trailing space, builtins don't — see `onPickSlashItem`) and leave
+      // the user in the composer. A second Enter — once the menu has
+      // closed — sends the message.
+      const isAccept =
+        e.key === "Tab" ||
+        (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing);
+      if (isAccept) {
         e.preventDefault();
         const pick = slashCandidates[slashHighlight];
-        if (pick) onPickSkill(pick);
+        if (pick) onPickSlashItem(pick);
         return;
       }
       if (e.key === "Escape") {
@@ -589,7 +644,7 @@ export function Composer({
               highlight={slashHighlight}
               query={slash.query}
               onHover={setSlashHighlight}
-              onPick={onPickSkill}
+              onPick={onPickSlashItem}
             />
           ) : null}
           <textarea
@@ -600,7 +655,7 @@ export function Composer({
             placeholder={
               isStreaming
                 ? "Streaming…"
-                : "Message the assistant. Type / for skills."
+                : "Message the assistant. Type / for skills and commands."
             }
             rows={1}
             disabled={disabled && !isStreaming}
@@ -633,6 +688,25 @@ export function Composer({
       </div>
     </div>
   );
+}
+
+/** When the active workspace has an attached folder, tell the model about
+ * it so file-writing tools land in the right place. Returns an empty list
+ * (caller spreads it) when no folder is attached, leaving extras unchanged. */
+function buildWorkspaceContext(path: string | undefined): string[] {
+  if (!path) return [];
+  return [
+    [
+      "[helix workspace]",
+      `The user's active workspace folder is: ${path}`,
+      "When you call file-system tools (read_file, write_file, edit_file,",
+      "glob_files, grep_search, search_files, read_pdf, read_excel), use",
+      "this folder as the working directory. Relative paths in tool",
+      "arguments are resolved against it; search tools that take a root",
+      "default to it. Prefer relative paths so files land inside the user's",
+      "workspace unless the user explicitly asks for a different location.",
+    ].join("\n"),
+  ];
 }
 
 /** Wrap the content sent to the model with a tiny attribution header, so a
@@ -1664,30 +1738,58 @@ function formatTokens(n: number): string {
 
 // -- Skills (slash invocation) ---------------------------------------------
 
-const EMPTY_SKILL_LIST: readonly Skill[] = [];
+/** Union of items that can appear in the slash popover. Skills come
+ * from disk and ride a separate render pipeline; built-in commands
+ * fire side effects directly inside the composer. Discriminated
+ * tag rather than two parallel arrays so ordering, highlighting, and
+ * keyboard navigation stay simple. */
+type SlashItem =
+  | { readonly kind: "skill"; readonly skill: Skill }
+  | { readonly kind: "builtin"; readonly command: BuiltinSlashCommand };
+
+const EMPTY_SLASH_ITEMS: readonly SlashItem[] = [];
 
 interface SlashState {
   /** The portion after `/` and before the first space — what's being typed. */
   readonly query: string;
-  /** Filtered skills, in display order. */
-  readonly candidates: readonly Skill[];
+  /** Filtered candidates, in display order. Built-in commands first
+   * (short, well-known list) so they're predictable to reach. */
+  readonly candidates: readonly SlashItem[];
 }
 
 /** Detect whether the textarea contents start with a slash command and,
- * if so, filter the skill list against the partial name. The menu only
- * appears while the user is still typing the name (no space yet) — once
- * they hit space they're in "arguments" territory and we hide it. */
-function parseSlash(text: string, skills: readonly Skill[]): SlashState | null {
+ * if so, filter the candidate list against the partial name. The menu
+ * only appears while the user is still typing the name (no space yet)
+ * — once they hit space they're in "arguments" territory and we hide
+ * it. Built-in commands and skills share one filtered list. */
+function parseSlash(
+  text: string,
+  skills: readonly Skill[],
+  commands: readonly BuiltinSlashCommand[],
+): SlashState | null {
   if (!text.startsWith("/")) return null;
   // Hide once the user typed a space — they're entering arguments now.
   const sliced = text.slice(1);
   if (/\s/.test(sliced)) return null;
   const query = sliced.toLowerCase();
-  const visible = skills.filter((s) => !s.error && s.userInvocable);
-  const candidates = visible.filter((s) =>
-    s.name.toLowerCase().includes(query),
-  );
-  return { query, candidates };
+  // Prefix matches rank above substring matches so the auto-highlighted
+  // top item is the natural completion of what the user just typed
+  // (`/cle` → `/clear` at top, not some skill containing "cle" mid-name).
+  // Stable sort preserves source order within each rank.
+  const rank = (name: string) =>
+    name.toLowerCase().startsWith(query) ? 0 : 1;
+  const builtinCandidates = commands
+    .filter((c) => c.name.toLowerCase().includes(query))
+    .slice()
+    .sort((a, b) => rank(a.name) - rank(b.name))
+    .map<SlashItem>((command) => ({ kind: "builtin", command }));
+  const skillCandidates = skills
+    .filter((s) => !s.error && s.userInvocable)
+    .filter((s) => s.name.toLowerCase().includes(query))
+    .slice()
+    .sort((a, b) => rank(a.name) - rank(b.name))
+    .map<SlashItem>((skill) => ({ kind: "skill", skill }));
+  return { query, candidates: [...builtinCandidates, ...skillCandidates] };
 }
 
 /** Match `/skill-name [args]` against the loaded skill list. Returns the
@@ -1775,11 +1877,11 @@ async function buildSkillContext(
 }
 
 interface SkillsSlashMenuProps {
-  readonly candidates: readonly Skill[];
+  readonly candidates: readonly SlashItem[];
   readonly highlight: number;
   readonly query: string;
   readonly onHover: (idx: number) => void;
-  readonly onPick: (skill: Skill) => void;
+  readonly onPick: (item: SlashItem) => void;
 }
 
 function SkillsSlashMenu({
@@ -1791,12 +1893,12 @@ function SkillsSlashMenu({
 }: SkillsSlashMenuProps) {
   if (candidates.length === 0) {
     return (
-      <div className="mcp-menu" role="listbox" aria-label="Skills">
+      <div className="mcp-menu" role="listbox" aria-label="Slash commands">
         <header className="mcp-menu-head">
           <div>
-            <div className="mcp-menu-title">Skills</div>
+            <div className="mcp-menu-title">Commands</div>
             <div className="mcp-menu-hint">
-              No skills match <code>/{query}</code>. Add one under{" "}
+              Nothing matches <code>/{query}</code>. Add a skill under{" "}
               <code>~/.claude/skills/</code> or your workspace's{" "}
               <code>.claude/skills/</code>.
             </div>
@@ -1806,59 +1908,72 @@ function SkillsSlashMenu({
     );
   }
   return (
-    <div className="mcp-menu" role="listbox" aria-label="Skills">
+    <div className="mcp-menu" role="listbox" aria-label="Slash commands">
       <header className="mcp-menu-head">
         <div>
           <div className="mcp-menu-title">
-            Skills
+            Commands
             <span className="mcp-menu-count">{candidates.length}</span>
           </div>
           <div className="mcp-menu-hint">
-            <Kbd>↑</Kbd> <Kbd>↓</Kbd> select · <Kbd>Tab</Kbd> insert ·{" "}
-            <Kbd>Esc</Kbd> dismiss
+            <Kbd>↑</Kbd> <Kbd>↓</Kbd> select · <Kbd>Tab</Kbd>/<Kbd>↵</Kbd>{" "}
+            insert · <Kbd>Esc</Kbd> dismiss
           </div>
         </div>
       </header>
       <ul className="mcp-menu-items">
-        {candidates.map((skill, idx) => (
-          <li
-            key={skill.id}
-            role="option"
-            aria-selected={idx === highlight}
-            className="mcp-menu-item mcp-menu-item-action"
-            data-active={idx === highlight || undefined}
-          >
-            <button
-              type="button"
-              className="mcp-menu-item-body"
-              onMouseEnter={() => onHover(idx)}
-              onMouseDown={(e) => {
-                // mousedown so the click registers before the textarea
-                // blurs and the menu unmounts.
-                e.preventDefault();
-                onPick(skill);
-              }}
+        {candidates.map((item, idx) => {
+          const key =
+            item.kind === "skill"
+              ? `skill:${item.skill.id}`
+              : `builtin:${item.command.name}`;
+          const name =
+            item.kind === "skill" ? item.skill.name : item.command.name;
+          const description =
+            item.kind === "skill"
+              ? item.skill.description
+              : item.command.description;
+          const argumentHint =
+            item.kind === "skill" ? item.skill.argumentHint : undefined;
+          const sourceLabel =
+            item.kind === "skill"
+              ? item.skill.source === "project"
+                ? "project"
+                : "user"
+              : "built-in";
+          return (
+            <li
+              key={key}
+              role="option"
+              aria-selected={idx === highlight}
+              className="mcp-menu-item mcp-menu-item-action"
+              data-active={idx === highlight || undefined}
             >
-              <span className="mcp-menu-item-text">
-                <code className="mcp-menu-item-name">/{skill.name}</code>
-                {skill.argumentHint ? (
-                  <span className="mcp-menu-item-meta">
-                    {" "}
-                    {skill.argumentHint}
-                  </span>
-                ) : null}
-                {skill.description ? (
-                  <span className="mcp-menu-item-desc">
-                    {skill.description}
-                  </span>
-                ) : null}
-                <span className="mcp-menu-item-meta">
-                  {skill.source === "project" ? "project" : "user"}
+              <button
+                type="button"
+                className="mcp-menu-item-body"
+                onMouseEnter={() => onHover(idx)}
+                onMouseDown={(e) => {
+                  // mousedown so the click registers before the textarea
+                  // blurs and the menu unmounts.
+                  e.preventDefault();
+                  onPick(item);
+                }}
+              >
+                <span className="mcp-menu-item-text">
+                  <code className="mcp-menu-item-name">/{name}</code>
+                  {argumentHint ? (
+                    <span className="mcp-menu-item-meta"> {argumentHint}</span>
+                  ) : null}
+                  {description ? (
+                    <span className="mcp-menu-item-desc">{description}</span>
+                  ) : null}
+                  <span className="mcp-menu-item-meta">{sourceLabel}</span>
                 </span>
-              </span>
-            </button>
-          </li>
-        ))}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

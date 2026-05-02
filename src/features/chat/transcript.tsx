@@ -116,10 +116,29 @@ function MessageView({ message, stale = false }: MessageViewProps) {
         {isAssistant ? (
           <Markdown content={message.content} streaming={streaming} />
         ) : (
-          <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{message.content}</p>
+          <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+            {renderUserBody(message.content)}
+          </p>
         )}
       </div>
     </div>
+  );
+}
+
+// Match a leading `/skillname` token (word chars + hyphens) optionally
+// followed by whitespace and arguments. We don't validate the name against
+// the loaded skill list — the visual cue means "this looks like a slash
+// command", which holds even for typos or removed skills.
+const SLASH_TOKEN_RE = /^(\/[\w-]+)(\s[\s\S]*)?$/;
+
+function renderUserBody(content: string) {
+  const match = SLASH_TOKEN_RE.exec(content);
+  if (!match) return content;
+  return (
+    <>
+      <span className="msg-slash-token">{match[1]}</span>
+      {match[2] ?? ""}
+    </>
   );
 }
 

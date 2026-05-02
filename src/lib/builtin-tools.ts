@@ -20,6 +20,80 @@ export const BUILTIN_SERVER_ID = "__builtin__";
 /** Display name shown in the chip / popover header. */
 export const BUILTIN_SERVER_NAME = "Built-in";
 
+/** UI handlers some built-in tools need to reach back into React. The
+ * composer registers its callbacks on mount; the dispatcher reads them
+ * when a tool that needs them fires. Module-level registry rather than
+ * threading callbacks through the agent loop — `useChat` doesn't know
+ * about UI affordances and shouldn't have to. */
+interface BuiltinUiHandlers {
+  /** Clear the visible transcript and reset model-side context. Used by
+   * the `clear` built-in tool and the `/clear` slash command — both are
+   * "hard" resets. The context-usage chip uses a separate, soft reset
+   * that only forgets old messages on the model side. */
+  clearTranscript?: () => void;
+  /** Active workspace's attached folder. When set, relative paths handed
+   * to file-system tools are resolved against it, and search tools that
+   * take a root default to it. Empty/unset means "no workspace folder" —
+   * the dispatcher then leaves paths verbatim and the process CWD wins. */
+  workspacePath?: string;
+}
+const uiHandlers: BuiltinUiHandlers = {};
+
+/** Read the currently-attached workspace folder, if any. Surfaced for the
+ * composer's system-context injection so the model is told where it is. */
+export function getBuiltinWorkspacePath(): string | undefined {
+  const p = uiHandlers.workspacePath;
+  return p && p.length > 0 ? p : undefined;
+}
+
+/** True when `p` looks absolute on either Unix or Windows. Cheap heuristic
+ * — we don't need to resolve symlinks, just decide whether to prepend the
+ * workspace folder. */
+function isAbsolutePath(p: string): boolean {
+  if (!p) return false;
+  if (p.startsWith("/") || p.startsWith("\\")) return true;
+  // Windows drive-letter path: C:\foo, c:/foo, …
+  return /^[a-zA-Z]:[\\/]/.test(p);
+}
+
+/** Join a possibly-relative path against the active workspace folder.
+ * Absolute paths and `~`-expanded paths pass through unchanged. Returns
+ * the input verbatim when no workspace is attached so the legacy
+ * "process CWD" behaviour is preserved for users who haven't picked one. */
+function resolveAgainstWorkspace(path: string): string {
+  if (!path) return path;
+  if (isAbsolutePath(path)) return path;
+  if (path.startsWith("~")) return path; // shell tilde — leave for the OS
+  const ws = uiHandlers.workspacePath;
+  if (!ws) return path;
+  const sep = /[\\/]$/.test(ws) ? "" : "/";
+  return `${ws}${sep}${path}`;
+}
+
+/** Register the React-side callbacks the dispatcher can invoke. Pass
+ * `undefined` to clear a slot (e.g. on unmount). The composer wires this
+ * up via `useEffect`. */
+export function setBuiltinUiHandlers(next: BuiltinUiHandlers): void {
+  Object.assign(uiHandlers, next);
+}
+
+/** User-typed slash commands that the composer handles directly — they
+ * never round-trip to the model. Distinct from {@link BUILTIN_TOOLS},
+ * which the model invokes; these are textarea shortcuts. They surface
+ * in the slash popover next to skills and short-circuit `submit()`. */
+export interface BuiltinSlashCommand {
+  readonly name: string;
+  readonly description: string;
+}
+
+export const BUILTIN_SLASH_COMMANDS: readonly BuiltinSlashCommand[] = [
+  {
+    name: "clear",
+    description:
+      "Clear the visible chat transcript and reset the model's context. The conversation starts fresh.",
+  },
+];
+
 /** Subgroups inside the Helix Core popover — mirror the MCP popover's
  * tag-bucket layout so each kind of capability gets its own master switch. */
 export type BuiltinToolGroup = "file_system" | "data";
@@ -50,13 +124,14 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
     label: "Read",
     group: "file_system",
     description:
-      "Read the contents of a file from the local filesystem. Supports text, images, PDFs, and Jupyter notebooks. Text comes back with line numbers prepended (cat -n style). Use offset/limit to window into long files.",
+      "Read the contents of a file from the local filesystem. Supports text, images, PDFs, and Jupyter notebooks. Text comes back with line numbers prepended (cat -n style). Use offset/limit to window into long files. Relative paths are resolved against the active workspace folder when one is attached.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Absolute path to the file to read.",
+          description:
+            "Path to the file to read. Absolute, or relative to the active workspace folder.",
         },
         offset: {
           type: "integer",
@@ -75,17 +150,30 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
     },
   },
   {
+    name: "clear",
+    label: "Clear",
+    group: "file_system",
+    description:
+      "Clear the visible chat transcript and reset the model's context. After this fires, both the UI and the model see an empty conversation. Use when the user asks to start over or wipe history. Equivalent to the user typing /clear.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
     name: "read_pdf",
     label: "Read PDF",
     group: "file_system",
     description:
-      "Extract plain text from a PDF using a pure-Rust extractor. Pages are separated by form-feed characters. Best-effort on scanned / image-only PDFs (no OCR — only the embedded text layer is returned). Capped at 50 MB input and 500 KB output.",
+      "Extract plain text from a PDF using a pure-Rust extractor. Pages are separated by form-feed characters. Best-effort on scanned / image-only PDFs (no OCR — only the embedded text layer is returned). Capped at 50 MB input and 500 KB output. Relative paths resolve against the active workspace folder.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Absolute path to the PDF file.",
+          description:
+            "Path to the PDF file. Absolute, or relative to the active workspace folder.",
         },
       },
       required: ["path"],
@@ -96,13 +184,14 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
     label: "Write",
     group: "file_system",
     description:
-      "Create or overwrite a file at the given path. Missing parent directories are created automatically. Use Edit for surgical changes; this overwrites the whole file.",
+      "Create or overwrite a file at the given path. Missing parent directories are created automatically. Use Edit for surgical changes; this overwrites the whole file. When the user has attached a workspace folder, relative paths are resolved inside that folder — prefer relative paths so files land in the user's workspace by default.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Absolute path to the file to create or replace.",
+          description:
+            "Path to the file to create or replace. Absolute, or relative to the active workspace folder. Prefer relative paths when a workspace is attached so the file lands inside it.",
         },
         content: {
           type: "string",
@@ -117,13 +206,14 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
     label: "Edit",
     group: "file_system",
     description:
-      "Replace one (or all) occurrences of `old_string` with `new_string` in an existing file. Without `replace_all`, the call fails when `old_string` is not unique — supply a longer excerpt or set replace_all=true.",
+      "Replace one (or all) occurrences of `old_string` with `new_string` in an existing file. Without `replace_all`, the call fails when `old_string` is not unique — supply a longer excerpt or set replace_all=true. Relative paths resolve against the active workspace folder.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Absolute path to the file to modify.",
+          description:
+            "Path to the file to modify. Absolute, or relative to the active workspace folder.",
         },
         old_string: {
           type: "string",
@@ -147,7 +237,7 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
     label: "Glob",
     group: "file_system",
     description:
-      "Find files matching a glob pattern (e.g. `**/*.ts`, `src/**/*.py`). Results come back sorted newest-first by modification time. Supply `cwd` to anchor relative patterns.",
+      "Find files matching a glob pattern (e.g. `**/*.ts`, `src/**/*.py`). Results come back sorted newest-first by modification time. Supply `cwd` to anchor relative patterns; defaults to the active workspace folder when one is attached.",
     inputSchema: {
       type: "object",
       properties: {
@@ -169,7 +259,7 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
     label: "Grep",
     group: "file_system",
     description:
-      "Regex search across files. Honours .gitignore by default. `mode` picks between filename-only matches (`files`), line-by-line content with optional context, or per-file counts.",
+      "Regex search across files. Honours .gitignore by default. `mode` picks between filename-only matches (`files`), line-by-line content with optional context, or per-file counts. The search root defaults to the active workspace folder when one is attached.",
     inputSchema: {
       type: "object",
       properties: {
@@ -222,7 +312,7 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
     label: "Search Files",
     group: "file_system",
     description:
-      "High-performance code search via the ripgrep binary on PATH. Honours .gitignore by default. Supports file-type filters (--type rust|ts|py|...), multiline regex, fixed-string mode, and hidden-file inclusion. Modes: `files` (default — list of paths), `content` (path:line:text with optional context), or `count` (per-file match counts).",
+      "High-performance code search via the ripgrep binary on PATH. Honours .gitignore by default. Supports file-type filters (--type rust|ts|py|...), multiline regex, fixed-string mode, and hidden-file inclusion. Modes: `files` (default — list of paths), `content` (path:line:text with optional context), or `count` (per-file match counts). The search root defaults to the active workspace folder when one is attached.",
     inputSchema: {
       type: "object",
       properties: {
@@ -290,13 +380,14 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
     label: "Read Excel",
     group: "data",
     description:
-      "Load an Excel / ODS / XLS workbook into a Polars DataFrame. Returns a handle plus a 10-row preview and column dtypes. Pass the handle to analyse_data for grouping, pivoting, filtering, sorting, and summary statistics.",
+      "Load an Excel / ODS / XLS workbook into a Polars DataFrame. Returns a handle plus a 10-row preview and column dtypes. Pass the handle to analyse_data for grouping, pivoting, filtering, sorting, and summary statistics. Relative paths resolve against the active workspace folder.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Absolute path to the workbook (.xlsx, .xls, .ods).",
+          description:
+            "Path to the workbook (.xlsx, .xls, .ods). Absolute, or relative to the active workspace folder.",
         },
         sheet: {
           type: "string",
@@ -381,7 +472,8 @@ export async function runBuiltinTool(
         if (typeof path !== "string" || !path) {
           return { result: "read_file: missing `path`", isError: true };
         }
-        const r = await window.helixApi.readFile(path, { offset, limit });
+        const resolved = resolveAgainstWorkspace(path);
+        const r = await window.helixApi.readFile(resolved, { offset, limit });
         // Image / PDF reads come back as data URLs — relay verbatim so the
         // model can include them in its tool result and a downstream
         // markdown image renderer can pick them up. Notebooks and text both
@@ -399,12 +491,28 @@ export async function runBuiltinTool(
         const header = headerLines.length > 0 ? `${headerLines.join("\n")}\n\n` : "";
         return { result: `${header}${r.content}`, isError: false };
       }
+      case "clear": {
+        if (!uiHandlers.clearTranscript) {
+          return {
+            result:
+              "clear: no active chat to clear (UI handler not registered).",
+            isError: true,
+          };
+        }
+        uiHandlers.clearTranscript();
+        return {
+          result:
+            "Chat transcript cleared. The conversation has been reset.",
+          isError: false,
+        };
+      }
       case "read_pdf": {
         const { path } = args as { path?: string };
         if (typeof path !== "string" || !path) {
           return { result: "read_pdf: missing `path`", isError: true };
         }
-        const r = await window.helixApi.readPdf(path);
+        const resolved = resolveAgainstWorkspace(path);
+        const r = await window.helixApi.readPdf(resolved);
         const header = `PDF: ${r.path} (${r.size} bytes)${r.truncated ? " — truncated" : ""}`;
         return { result: `${header}\n\n${r.text}`, isError: false };
       }
@@ -419,7 +527,8 @@ export async function runBuiltinTool(
         if (typeof content !== "string") {
           return { result: "write_file: missing `content`", isError: true };
         }
-        const r = await window.helixApi.writeFile(path, content);
+        const resolved = resolveAgainstWorkspace(path);
+        const r = await window.helixApi.writeFile(resolved, content);
         return {
           result: `${r.created ? "Created" : "Updated"} ${r.path} (${r.bytesWritten} bytes)`,
           isError: false,
@@ -441,7 +550,8 @@ export async function runBuiltinTool(
             isError: true,
           };
         }
-        const r = await window.helixApi.editFile(path, old_string, new_string, {
+        const resolved = resolveAgainstWorkspace(path);
+        const r = await window.helixApi.editFile(resolved, old_string, new_string, {
           replaceAll: !!replace_all,
         });
         return {
@@ -454,7 +564,11 @@ export async function runBuiltinTool(
         if (typeof pattern !== "string" || !pattern) {
           return { result: "glob_files: missing `pattern`", isError: true };
         }
-        const matches = await window.helixApi.globFiles(pattern, cwd);
+        // No cwd given → anchor to the workspace folder when one's attached
+        // so a `**/*.ts` from the model lines up with what the user sees in
+        // the right-hand panel. Falls through to process CWD otherwise.
+        const effectiveCwd = cwd ?? uiHandlers.workspacePath;
+        const matches = await window.helixApi.globFiles(pattern, effectiveCwd);
         if (matches.length === 0) {
           return {
             result: `No files matched: ${pattern}`,
@@ -468,9 +582,12 @@ export async function runBuiltinTool(
       }
       case "grep_search": {
         const a = args as Record<string, unknown>;
+        const rawPath = typeof a.path === "string" ? a.path : undefined;
         const r = await window.helixApi.grepSearch({
           pattern: String(a.pattern ?? ""),
-          path: typeof a.path === "string" ? a.path : undefined,
+          path: rawPath
+            ? resolveAgainstWorkspace(rawPath)
+            : uiHandlers.workspacePath,
           glob: typeof a.glob === "string" ? a.glob : undefined,
           mode:
             a.mode === "content" || a.mode === "count" ? a.mode : "files",
@@ -486,9 +603,12 @@ export async function runBuiltinTool(
       }
       case "search_files": {
         const a = args as Record<string, unknown>;
+        const rawPath = typeof a.path === "string" ? a.path : undefined;
         const r = await window.helixApi.searchFiles({
           pattern: String(a.pattern ?? ""),
-          path: typeof a.path === "string" ? a.path : undefined,
+          path: rawPath
+            ? resolveAgainstWorkspace(rawPath)
+            : uiHandlers.workspacePath,
           mode:
             a.mode === "content" || a.mode === "count" ? a.mode : "files",
           glob: typeof a.glob === "string" ? a.glob : undefined,
@@ -538,7 +658,8 @@ export async function runBuiltinTool(
         if (typeof path !== "string" || !path) {
           return { result: "read_excel: missing `path`", isError: true };
         }
-        const r = await window.helixApi.readExcel(path, {
+        const resolved = resolveAgainstWorkspace(path);
+        const r = await window.helixApi.readExcel(resolved, {
           sheet,
           hasHeader: typeof has_header === "boolean" ? has_header : undefined,
         });

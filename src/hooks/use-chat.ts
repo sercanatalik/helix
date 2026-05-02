@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BUILTIN_SERVER_ID, runBuiltinTool } from "../lib/builtin-tools";
 import { buildExtraBody, createClient } from "../lib/llm/client";
 import { isReasoningModel } from "../lib/llm/model-traits";
 import type {
@@ -207,6 +208,13 @@ async function runToolCall(
     };
   }
   try {
+    // Built-in tools (Read / Write / Edit / Glob / Grep) skip the MCP
+    // transport entirely — they're plain Tauri commands. The dispatcher
+    // already returns the same `{ result, isError }` shape so the agent
+    // loop doesn't need to know which transport produced the result.
+    if (binding.serverId === BUILTIN_SERVER_ID) {
+      return await runBuiltinTool(binding.toolName, args);
+    }
     const result = await window.helixApi.callMcpTool(
       binding.serverId,
       binding.toolName,

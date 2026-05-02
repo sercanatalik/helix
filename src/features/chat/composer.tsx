@@ -13,6 +13,13 @@ import { useSkills } from "../../hooks/use-skills";
 import type { ChatExtras, McpToolBinding } from "../../hooks/use-chat";
 import type { ProviderConfig } from "../../features/providers";
 import {
+  BUILTIN_GROUP_LABEL,
+  BUILTIN_SERVER_ID,
+  type BuiltinToolDef,
+  type BuiltinToolGroup,
+  useBuiltinTools,
+} from "../../lib/builtin-tools";
+import {
   contextWindowFor,
   estimateMessageTokens,
   estimateTokens,
@@ -91,6 +98,7 @@ export function Composer({
 }: ComposerProps) {
   const [text, setText] = useState("");
   const [open, setOpen] = useState<boolean>(false);
+  const [builtinOpen, setBuiltinOpen] = useState<boolean>(false);
   const [modelMenuOpen, setModelMenuOpen] = useState<boolean>(false);
   const activeModel = selectedModel || provider?.model;
   const modelsApi = useModels(provider);
@@ -108,12 +116,15 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mcpTriggerRef = useRef<HTMLButtonElement>(null);
   const mcpPopoverRef = useRef<HTMLDivElement>(null);
+  const builtinTriggerRef = useRef<HTMLButtonElement>(null);
+  const builtinPopoverRef = useRef<HTMLDivElement>(null);
   const canSend =
     text.trim().length > 0 && !disabled && !isStreaming && !!activeModel;
 
   const { servers, runtime, setToolEnabled, setPromptEnabled } =
     useMcpServers();
   const { skills, render: renderSkill } = useSkills();
+  const builtinTools = useBuiltinTools();
 
   // Slash-command parser. The user types `/skill-name args…`; we open a
   // filterable popover as soon as the textarea opens with `/` so they can
@@ -146,6 +157,23 @@ export function Composer({
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
+
+  // Same dismiss behaviour for the built-in tools popover. Two refs / two
+  // effects rather than a unified controller — keeps each popover's
+  // open/close lifecycle independent so opening one auto-closes the other
+  // implicitly via the outside-click on its trigger.
+  useEffect(() => {
+    if (!builtinOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (builtinTriggerRef.current?.contains(target)) return;
+      if (builtinPopoverRef.current?.contains(target)) return;
+      setBuiltinOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [builtinOpen]);
 
   /** Discoverable skills shown to the model on every send. Mirrors Claude
    * Desktop's "metadata always pre-loaded" behaviour: name + description
@@ -329,9 +357,21 @@ export function Composer({
 
   /** Build the McpToolBinding list passed to the chat hook. We include every
    * advertised tool from a *connected* server that hasn't been disabled by
-   * the user — so the toggle in the menu controls model visibility directly. */
+   * the user — so the toggle in the menu controls model visibility directly.
+   * Built-in tools (Read / Write / Edit / Glob / Grep) ride the same list
+   * with a sentinel server id; `useChat`'s dispatcher routes them to the
+   * Tauri backend instead of an MCP transport. */
   const mcpToolBindings = useMemo<readonly McpToolBinding[]>(() => {
     const out: McpToolBinding[] = [];
+    for (const tool of builtinTools.tools) {
+      if (!builtinTools.isEnabled(tool.name)) continue;
+      out.push({
+        serverId: BUILTIN_SERVER_ID,
+        toolName: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      });
+    }
     for (const group of groups.tools) {
       const disabled = new Set(group.server.disabledTools ?? []);
       for (const tool of group.items) {
@@ -345,7 +385,7 @@ export function Composer({
       }
     }
     return out;
-  }, [groups.tools]);
+  }, [groups.tools, builtinTools]);
 
   async function submit() {
     if (!canSend) return;
@@ -440,6 +480,15 @@ export function Composer({
         {hint ? <div className="composer-status">{hint}</div> : null}
         <div className="composer-tools">
           <ToolChip
+            buttonRef={builtinTriggerRef}
+            icon={<HammerIcon />}
+            label="Helix Core"
+            count={`${builtinTools.enabledNames.length}/${builtinTools.tools.length}`}
+            active={builtinOpen}
+            tooltip="Helix Core tools (Read, Write, Edit, Glob, Grep) — enabled by default"
+            onClick={() => setBuiltinOpen((v) => !v)}
+          />
+          <ToolChip
             buttonRef={mcpTriggerRef}
             icon={<WrenchIcon />}
             label="MCP"
@@ -519,6 +568,17 @@ export function Composer({
             onReadResource={(server, resource) =>
               void onReadResource(server, resource)
             }
+          />
+        ) : null}
+
+        {builtinOpen ? (
+          <BuiltinDiscoveryPopover
+            popoverRef={builtinPopoverRef}
+            tools={builtinTools.tools}
+            isEnabled={builtinTools.isEnabled}
+            enabledCount={builtinTools.enabledNames.length}
+            onToggle={builtinTools.setEnabled}
+            onClose={() => setBuiltinOpen(false)}
           />
         ) : null}
 
@@ -627,6 +687,9 @@ interface ToolChipProps {
   readonly disabled?: boolean;
   readonly onClick?: () => void;
   readonly buttonRef?: React.Ref<HTMLButtonElement>;
+  /** Override the default `title` string. The MCP chip falls back to a
+   * connection-aware default; built-in / future chips can supply their own. */
+  readonly tooltip?: string;
 }
 
 function ToolChip({
@@ -637,7 +700,13 @@ function ToolChip({
   disabled,
   onClick,
   buttonRef,
+  tooltip,
 }: ToolChipProps) {
+  const title =
+    tooltip ??
+    (disabled
+      ? `${label} — connect an MCP server in Settings → MCP`
+      : `${label} from connected MCP servers`);
   return (
     <button
       ref={buttonRef}
@@ -646,11 +715,7 @@ function ToolChip({
       data-active={active || undefined}
       data-disabled={disabled || undefined}
       disabled={disabled}
-      title={
-        disabled
-          ? `${label} — connect an MCP server in Settings → MCP`
-          : `${label} from connected MCP servers`
-      }
+      title={title}
       onClick={onClick}
     >
       <span className="tool-chip-icon" aria-hidden>
@@ -1111,6 +1176,159 @@ function Switch({
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// -- Built-in tools popover --------------------------------------------
+
+interface BuiltinDiscoveryPopoverProps {
+  readonly tools: readonly BuiltinToolDef[];
+  readonly isEnabled: (name: string) => boolean;
+  readonly enabledCount: number;
+  readonly onToggle: (name: string, enabled: boolean) => void;
+  readonly onClose: () => void;
+  readonly popoverRef?: React.Ref<HTMLDivElement>;
+}
+
+/** Sibling of {@link McpDiscoveryPopover}, scoped to local Tauri-backed
+ * tools (Read / Write / Edit / Glob / Grep). All tools default to enabled
+ * — the toggle simply hides one from the model on subsequent sends. Reuses
+ * the MCP menu's class names so the popover inherits the same visual
+ * shell without bespoke styles. */
+function BuiltinDiscoveryPopover({
+  tools,
+  isEnabled,
+  enabledCount,
+  onToggle,
+  onClose,
+  popoverRef,
+}: BuiltinDiscoveryPopoverProps) {
+  return (
+    <div
+      ref={popoverRef}
+      className="mcp-menu"
+      role="dialog"
+      aria-label="Helix Core tools"
+    >
+      <header className="mcp-menu-head">
+        <div>
+          <div className="mcp-menu-title">
+            Helix Core
+            <span className="mcp-menu-count">
+              {enabledCount}/{tools.length}
+            </span>
+          </div>
+          <div className="mcp-menu-hint">
+            Local Helix Core tools backed by the Rust runtime — File System
+            (Read, Write, Edit, Glob, Grep) and Data (Read Excel, Analyse
+            Data via Polars). Enabled by default; toggle individual chips
+            or flip a group's master switch to opt out for the next send.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="mcp-menu-close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          <CloseIcon />
+        </button>
+      </header>
+
+      <div className="mcp-menu-groups">
+        <section className="mcp-menu-section">
+          <div className="mcp-menu-section-head">
+            <span className="mcp-menu-section-name">Helix Core</span>
+            <span className="mcp-menu-section-count">{tools.length}</span>
+          </div>
+          <div className="mcp-menu-subgroups">
+            {bucketByGroup(tools).map(({ group, items }) => {
+              const groupEnabled = items.filter((t) => isEnabled(t.name)).length;
+              const allOn = groupEnabled === items.length;
+              return (
+                <div key={group} className="mcp-menu-subsection">
+                  <label className="mcp-menu-subsection-head">
+                    <Switch
+                      checked={allOn}
+                      onChange={(next) => {
+                        for (const t of items) {
+                          if (isEnabled(t.name) !== next) onToggle(t.name, next);
+                        }
+                      }}
+                      ariaLabel={`Enable all ${BUILTIN_GROUP_LABEL[group]} tools`}
+                    />
+                    <span className="mcp-menu-subsection-name">
+                      {BUILTIN_GROUP_LABEL[group]}
+                    </span>
+                    <span className="mcp-menu-section-count">
+                      {groupEnabled}/{items.length}
+                    </span>
+                  </label>
+                  <ul className="mcp-tool-chips">
+                    {items.map((t) => {
+                      const on = isEnabled(t.name);
+                      return (
+                        <li key={t.name} className="mcp-tool-chip-li">
+                          <button
+                            type="button"
+                            className="mcp-tool-chip"
+                            data-kind="tool"
+                            data-off={on ? undefined : true}
+                            title={t.description}
+                            aria-pressed={on}
+                            onClick={() => onToggle(t.name, !on)}
+                          >
+                            {t.label}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/** Bucket the catalogue by `group` while preserving catalogue order both
+ * across groups and within them. Stable order means the popover doesn't
+ * shift around on re-render. */
+function bucketByGroup(
+  tools: readonly BuiltinToolDef[],
+): readonly { group: BuiltinToolGroup; items: BuiltinToolDef[] }[] {
+  const map = new Map<BuiltinToolGroup, BuiltinToolDef[]>();
+  for (const t of tools) {
+    let bucket = map.get(t.group);
+    if (!bucket) {
+      bucket = [];
+      map.set(t.group, bucket);
+    }
+    bucket.push(t);
+  }
+  return Array.from(map.entries()).map(([group, items]) => ({ group, items }));
+}
+
+function HammerIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m15 12-8.5 8.5a2.121 2.121 0 0 1-3-3L12 9" />
+      <path d="M17.64 15 22 10.64" />
+      <path d="m20.91 11.7-1.25-1.25c-.6-.6-.93-1.4-.93-2.25v-.86L16.01 4.6a5.56 5.56 0 0 0-3.94-1.64H9l.92.82A6.18 6.18 0 0 1 12 8.4v1.56l2 2h2.47l2.26 1.91" />
+    </svg>
+  );
 }
 
 function WrenchIcon() {

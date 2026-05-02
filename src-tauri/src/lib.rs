@@ -1,10 +1,13 @@
 mod commands;
+mod data_tools;
 mod mcp;
 mod mcp_defaults;
 mod skills;
+mod tools;
 mod types;
 
 use commands::{SharedMcp, SharedSkills, SharedState, WatcherState};
+use data_tools::DataFrameStore;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{App, Emitter, Manager};
@@ -78,6 +81,9 @@ pub fn run() {
         .setup(|app| {
             app.manage::<SharedState>(Mutex::new(DesktopAppState::default()));
             app.manage::<WatcherState>(Mutex::new(None));
+            // Polars-backed data tools store. Lives for the app lifetime;
+            // bounded internally via LRU eviction.
+            app.manage::<DataFrameStore>(DataFrameStore::new());
 
             let app_handle = app.handle().clone();
             let manager = Arc::new(mcp::McpManager::new(move |runtime| {
@@ -178,6 +184,15 @@ pub fn run() {
             commands::set_skills_workspace,
             commands::reload_skills,
             commands::render_skill,
+            tools::read_file,
+            tools::read_pdf,
+            tools::write_file,
+            tools::edit_file,
+            tools::glob_files,
+            tools::grep_search,
+            tools::search_files,
+            data_tools::read_excel,
+            data_tools::analyse_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -71,7 +71,14 @@ function ContextResetDivider() {
   );
 }
 
-function MessageView({ message }: { readonly message: TranscriptMessage }) {
+interface MessageViewProps {
+  readonly message: TranscriptMessage;
+  /** True when this message sits before the active context-reset boundary.
+   * Visible in the transcript but no longer part of the model-side stack. */
+  readonly stale?: boolean;
+}
+
+function MessageView({ message, stale = false }: MessageViewProps) {
   const streaming = message.status === "streaming";
   const isAssistant = message.role === "assistant";
   // Tool rows are a streaming affordance — they show what the model is
@@ -86,7 +93,11 @@ function MessageView({ message }: { readonly message: TranscriptMessage }) {
   const verb = useRotatingVerb(isAssistant && streaming);
 
   return (
-    <div className="msg" data-status={message.status}>
+    <div
+      className="msg"
+      data-status={message.status}
+      data-stale={stale ? "true" : undefined}
+    >
       <div className="msg-role" data-role={message.role}>
         {message.role}
       </div>

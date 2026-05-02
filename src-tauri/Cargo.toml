@@ -13,12 +13,12 @@ name = "helix-ai"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = { version = "2.4", features = [] }
+tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
-tauri = { version = "2.10", features = [] }
-tauri-plugin-http = "2"
-tauri-plugin-dialog = "2"
+tauri = { version = "2.11", features = [] }
+tauri-plugin-http = "2.5"
+tauri-plugin-dialog = "2.7"
 notify = "6"
 
 tokio = { version = "1.48", features = ["sync", "rt-multi-thread", "macros", "process", "time"] }
@@ -37,6 +37,38 @@ rmcp = { version = "1.5", default-features = false, features = [
   "transport-streamable-http-client",
   "transport-streamable-http-client-reqwest",
   "reqwest",
+] }
+
+# Built-in file & code-operation tools (read/write/edit/glob/grep). Kept as
+# explicit dependencies even though some come in transitively via tauri /
+# rmcp — pinning here keeps the surface stable when those bump.
+glob = "0.3"
+regex = "1"
+ignore = "0.4"
+base64 = "0.22"
+# PDF text extraction for the read_pdf tool. `pdf-extract` is pure Rust
+# (no system PDFium / poppler), at the cost of being best-effort on
+# non-Latin scripts and image-only PDFs.
+pdf-extract = "0.7"
+
+# Built-in data tools (read_excel, analyse_data). Polars handles the
+# DataFrame side; calamine parses xlsx/xls/ods into the cell stream we
+# convert into typed columns. The polars feature set is conservative —
+# enough to back groupby/pivot/filter/sort/describe without bloating the
+# binary with rarely-used kernels.
+calamine = "0.26"
+polars = { version = "0.46", default-features = false, features = [
+  "lazy",
+  "csv",
+  "json",
+  "pivot",
+  "is_in",
+  "strings",
+  "regex",
+  "temporal",
+  "dtype-full",
+  "rows",
+  "fmt",
 ] }
 
 [features]

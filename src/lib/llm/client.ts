@@ -90,10 +90,15 @@ export interface LLMClient {
     request: ChatCompletionRequest,
     opts?: RequestOptions,
   ): AsyncIterable<ChatCompletionChunk>;
+  /** List available models from the provider's `/models` endpoint. Returns
+   * model ids in the order the provider reported them. Throws LLMError on
+   * transport or HTTP failure — callers fall back to `provider.model`. */
+  listModels(opts?: RequestOptions): Promise<readonly string[]>;
 }
 
 export function createClient(provider: ProviderConfig): LLMClient {
   const url = joinUrl(provider.baseUrl, "/chat/completions");
+  const modelsUrl = joinUrl(provider.baseUrl, "/models");
   const baseHeaders = buildHeaders(provider);
 
   return {
@@ -117,7 +122,92 @@ export function createClient(provider: ProviderConfig): LLMClient {
       // semantics line up with for-await usage in callers.
       return streamCompletions(url, baseHeaders, request, opts);
     },
+
+    async listModels(opts) {
+      return fetchModels(modelsUrl, baseHeaders, opts);
+    },
   };
+}
+
+/** GET the provider's `/models` endpoint and tease out model ids from the
+ * grab-bag of shapes providers actually return:
+ *   - OpenAI / OpenRouter / LiteLLM:  `{ data: [{ id }] }`
+ *   - Ollama:                         `{ models: [{ name }] }`
+ *   - bare array:                     `[{ id }]` or `["model-a", ...]`
+ * Anything we can't recognise becomes an empty list (caller falls back). */
+async function fetchModels(
+  url: string,
+  baseHeaders: Record<string, string>,
+  opts?: RequestOptions,
+): Promise<readonly string[]> {
+  const headers: Record<string, string> = {
+    ...baseHeaders,
+    Accept: "application/json",
+  };
+  // Drop the JSON Content-Type — GET has no body, and some servers reject it.
+  delete headers["Content-Type"];
+
+  let response: Response;
+  try {
+    response = await httpFetch(url, {
+      method: "GET",
+      headers,
+      signal: opts?.signal,
+    });
+  } catch (err) {
+    if (opts?.signal?.aborted) throw err;
+    throw new LLMError({
+      message: `Connection error: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      url,
+      cause: err,
+    });
+  }
+  if (!response.ok) {
+    throw await buildHttpError(response, url);
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (err) {
+    throw new LLMError({
+      message: `Could not parse models response JSON: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      url,
+      cause: err,
+    });
+  }
+  return extractModelIds(payload);
+}
+
+function extractModelIds(payload: unknown): readonly string[] {
+  const out: string[] = [];
+  const push = (entry: unknown) => {
+    if (typeof entry === "string") {
+      if (entry.trim()) out.push(entry);
+      return;
+    }
+    if (entry && typeof entry === "object") {
+      const e = entry as Record<string, unknown>;
+      const id = e.id ?? e.name ?? e.model;
+      if (typeof id === "string" && id.trim()) out.push(id);
+    }
+  };
+  if (Array.isArray(payload)) {
+    for (const entry of payload) push(entry);
+  } else if (payload && typeof payload === "object") {
+    const obj = payload as Record<string, unknown>;
+    const list = Array.isArray(obj.data)
+      ? obj.data
+      : Array.isArray(obj.models)
+        ? obj.models
+        : null;
+    if (list) for (const entry of list) push(entry);
+  }
+  // Dedupe while preserving order.
+  return Array.from(new Set(out));
 }
 
 async function sendRequest(

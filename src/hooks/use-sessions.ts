@@ -9,6 +9,7 @@ import {
 import type {
   SessionId,
   SessionRecord,
+  Timestamp,
   TranscriptMessage,
   WorkspaceId,
 } from "../app/types";
@@ -27,6 +28,13 @@ export interface UseSessionsResult {
   readonly setMessages: (
     id: SessionId,
     messages: readonly TranscriptMessage[],
+  ) => void;
+  /** Mark the context-reset boundary at the current moment — older
+   * transcript messages stay visible but stop riding along on subsequent
+   * model calls. Pass `undefined` to clear the boundary. */
+  readonly setContextResetAt: (
+    id: SessionId,
+    timestamp: Timestamp | undefined,
   ) => void;
 }
 
@@ -137,6 +145,19 @@ export function useSessions(
     [],
   );
 
+  const setContextResetAt = useCallback(
+    (id: SessionId, timestamp: Timestamp | undefined) => {
+      setAllSessions((curr) =>
+        curr.map((s) =>
+          s.id === id
+            ? { ...s, contextResetAt: timestamp, updatedAt: nowIso() }
+            : s,
+        ),
+      );
+    },
+    [],
+  );
+
   return {
     sessions,
     activeId: activeSession?.id,
@@ -145,5 +166,6 @@ export function useSessions(
     createSession,
     deleteSession,
     setMessages,
+    setContextResetAt,
   };
 }

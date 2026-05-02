@@ -380,6 +380,7 @@ function ChartHost({
   // finalize between renders. Tracking via ref dodges the re-render cascade
   // a useState would trigger on every observer tick.
   const viewRef = useRef<Result["view"] | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -411,7 +412,10 @@ function ChartHost({
       try {
         const result = await vegaEmbed(hostRef.current, spec, {
           mode,
-          actions: { export: true, source: false, compiled: false, editor: false },
+          // Disable the built-in three-dot action menu — the dedicated Save
+          // button on the chart toolbar handles PNG + data export with a
+          // single click, which is the action users actually want.
+          actions: false,
           renderer: "canvas",
           ast: true,
           expr: expressionInterpreter,
@@ -423,6 +427,7 @@ function ChartHost({
           return;
         }
         viewRef.current = result.view;
+        setReady(true);
       } catch (err) {
         // Render-time errors (e.g. an invalid scheme on the config) land
         // here. Surface them inside the host div so the user sees something
@@ -432,6 +437,7 @@ function ChartHost({
         const message = err instanceof Error ? err.message : String(err);
         target.textContent = `Vega render failed: ${message}`;
         target.setAttribute("data-vega-failed", "true");
+        setReady(false);
       }
     }
 
@@ -458,12 +464,213 @@ function ChartHost({
         viewRef.current.finalize();
         viewRef.current = null;
       }
+      setReady(false);
     };
   }, [spec, language, config, tokens]);
 
+  const baseName = () => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const slug = chartSlug(spec);
+    return slug ? `chart-${slug}-${stamp}` : `chart-${stamp}`;
+  };
+
+  const onSavePng = async () => {
+    const view = viewRef.current;
+    if (!view) return;
+    try {
+      // Render to a 2x canvas, then go canvas → Blob → object URL. Tauri's
+      // webview often refuses `<a download>` on a `data:` URL once it gets
+      // big (a high-DPI chart easily blows past the limit), but `blob:` URLs
+      // produced from `URL.createObjectURL` download reliably.
+      const canvas = await view.toCanvas(2);
+      const pngBlob = await canvasToBlob(canvas, "image/png");
+      if (pngBlob) downloadBlob(pngBlob, `${baseName()}.png`);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("chart png save failed", err);
+    }
+  };
+
+  const onSaveCsv = () => {
+    const view = viewRef.current;
+    if (!view) return;
+    try {
+      const rows = extractRows(spec, view);
+      if (!rows || rows.length === 0) return;
+      const csv = toCsv(rows);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      downloadBlob(blob, `${baseName()}.csv`);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("chart csv save failed", err);
+    }
+  };
+
   return (
     <div className="vega-chart">
+      {ready && (
+        <div className="vega-chart-actions">
+          <button
+            type="button"
+            className="vega-chart-save"
+            onClick={onSavePng}
+            aria-label="Save chart as PNG"
+            title="Save chart as PNG"
+          >
+            <DownloadIcon />
+          </button>
+          <button
+            type="button"
+            className="vega-chart-save"
+            onClick={onSaveCsv}
+            aria-label="Download chart data as CSV"
+            title="Download data as CSV"
+          >
+            <CsvIcon />
+          </button>
+        </div>
+      )}
       <div ref={hostRef} className="vega-chart-host" />
     </div>
   );
+}
+
+function DownloadIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
+// Spreadsheet glyph: a small "table" with a "CSV" badge feel — rendered as a
+// rectangle with two grid divisions so it reads as tabular data at 13px.
+function CsvIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+      <line x1="3" y1="15" x2="21" y2="15" />
+      <line x1="10" y1="4" x2="10" y2="20" />
+      <line x1="15" y1="4" x2="15" y2="20" />
+    </svg>
+  );
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Defer revoke so the webview has time to start the download — revoking
+  // synchronously occasionally cancels the in-flight save in Tauri/WebKit.
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type: string,
+): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob((b) => resolve(b), type);
+  });
+}
+
+// Pull the row-shaped dataset behind the rendered chart. Inline `data.values`
+// is the common case for chat-rendered specs; fall back to the compiled
+// view's default `source_0` dataset so charts that use top-level `datasets`
+// or transforms still produce a CSV. Only an array of plain objects is
+// useful for tabular export — we return null for anything else so the caller
+// can skip the download cleanly.
+function extractRows(
+  spec: VisualizationSpec,
+  view: Result["view"],
+): Record<string, unknown>[] | null {
+  const s = spec as Record<string, unknown>;
+  const data = s.data as Record<string, unknown> | undefined;
+  if (data && Array.isArray(data.values) && rowsLike(data.values)) {
+    return data.values as Record<string, unknown>[];
+  }
+  try {
+    const rows = view.data("source_0") as unknown;
+    if (Array.isArray(rows) && rows.length && rowsLike(rows)) {
+      return rows as Record<string, unknown>[];
+    }
+  } catch {
+    // view may not have that dataset
+  }
+  return null;
+}
+
+function rowsLike(arr: unknown[]): boolean {
+  return arr.every((r) => r !== null && typeof r === "object" && !Array.isArray(r));
+}
+
+// CSV serialiser: union of keys across all rows for the header, then escape
+// each cell per RFC 4180 (wrap in quotes when the value contains a comma,
+// quote, or newline; double up embedded quotes). Vega adds internal symbol
+// keys prefixed with `_` to source rows after compilation — strip those so
+// the export stays close to the user's original data shape.
+function toCsv(rows: Record<string, unknown>[]): string {
+  const keys = new Set<string>();
+  for (const row of rows) {
+    for (const k of Object.keys(row)) {
+      if (!k.startsWith("_")) keys.add(k);
+    }
+  }
+  const headers = Array.from(keys);
+  const escape = (v: unknown): string => {
+    if (v === null || v === undefined) return "";
+    const s =
+      typeof v === "object" ? JSON.stringify(v) : String(v);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [headers.map(escape).join(",")];
+  for (const row of rows) {
+    lines.push(headers.map((h) => escape(row[h])).join(","));
+  }
+  return lines.join("\n");
+}
+
+// Title → kebab slug for the download filename. Vega-Lite accepts a string
+// or an object with `text`; both forms get sanitised down to a short slug.
+function chartSlug(spec: VisualizationSpec): string {
+  const t = (spec as { title?: unknown }).title;
+  let raw = "";
+  if (typeof t === "string") raw = t;
+  else if (t && typeof t === "object" && "text" in t) {
+    const text = (t as { text?: unknown }).text;
+    if (typeof text === "string") raw = text;
+  }
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
 }

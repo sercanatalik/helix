@@ -71,10 +71,18 @@ export interface ChatCompletion {
 
 /** Streaming delta — fields that arrive piecemeal across SSE chunks. Tool
  * calls are sliced by `index` so the consumer can stitch name/arguments back
- * together as fragments arrive. */
+ * together as fragments arrive.
+ *
+ * `reasoning_content` is the de-facto field name for chain-of-thought tokens
+ * across DeepSeek-R1, Qwen, and most OpenAI-compatible proxies that surface
+ * thinking output. OpenRouter, vLLM, and a few others normalise it to a flat
+ * `reasoning` string instead — we read either, since they're never both set
+ * on the same provider. */
 export interface ChatCompletionChunkDelta {
   readonly role?: ChatRole;
   readonly content?: string | null;
+  readonly reasoning_content?: string | null;
+  readonly reasoning?: string | null;
   readonly tool_calls?: ReadonlyArray<{
     readonly index?: number;
     readonly id?: string;

@@ -622,9 +622,11 @@ async fn safe_list_tools(
 }
 
 /// Split a `_meta` payload into the convenience `tags` array and the full
-/// passthrough JSON. FastMCP namespaces tags under `_fastmcp.tags`; we also
-/// accept a top-level `tags` array for servers that publish them directly.
-/// Tag values must be strings; non-string entries are skipped.
+/// passthrough JSON. FastMCP namespaces tags under `_meta.fastmcp.tags` (the
+/// outer `_meta` is the MCP wire field; the inner `fastmcp` key has no
+/// leading underscore — see fastmcp/utilities/components.py::get_meta). We
+/// also accept a top-level `tags` array for servers that publish them
+/// directly. Tag values must be strings; non-string entries are skipped.
 fn split_meta(meta: Option<&rmcp::model::Meta>) -> (Vec<String>, Option<Value>) {
     let Some(meta) = meta else {
         return (Vec::new(), None);
@@ -638,7 +640,7 @@ fn split_meta(meta: Option<&rmcp::model::Meta>) -> (Vec<String>, Option<Value>) 
         })
     };
     let tags = meta
-        .get("_fastmcp")
+        .get("fastmcp")
         .and_then(|v| v.get("tags"))
         .and_then(from_array)
         .or_else(|| meta.get("tags").and_then(from_array))

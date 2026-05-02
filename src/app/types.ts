@@ -133,10 +133,13 @@ export type SessionStatus = "idle" | "running" | "failed";
 
 export type MessageStatus = "streaming" | "complete" | "error";
 
+export type ToolCallStatus = "running" | "complete" | "error";
+
 /** Record of one MCP tool call that ran while producing the assistant
- * message it's attached to. Kept on the transcript so the user can
- * retroactively inspect what the model did, even though the call itself
- * stays hidden during streaming. */
+ * message it's attached to. Pushed onto the transcript as soon as the model
+ * commits to the call (status: "running"), then patched to "complete" /
+ * "error" with `result` filled in once the MCP server replies. Streaming
+ * UIs can therefore render it live, Claude-Desktop-style. */
 export interface ToolCallRecord {
   readonly id: string;
   readonly serverId: string;
@@ -147,10 +150,13 @@ export interface ToolCallRecord {
    * keeping it as a string preserves whatever the model emitted (including
    * partial-but-valid JSON). */
   readonly arguments: string;
-  /** Flat-text result returned by the tool. Errors are also stored here
-   * (with `isError: true` set) so the debug panel can render them
-   * uniformly. */
+  /** Flat-text result returned by the tool. Empty while `status` is
+   * "running"; populated when the call resolves or errors. */
   readonly result: string;
+  readonly status: ToolCallStatus;
+  /** Convenience flag mirroring `status === "error"`. Kept on the type so
+   * older transcripts persisted without a `status` field still render
+   * correctly when migrated. */
   readonly isError: boolean;
   readonly durationMs?: number;
 }
@@ -162,9 +168,14 @@ export interface TranscriptMessage {
   readonly createdAt: Timestamp;
   readonly status?: MessageStatus;
   /** Tool calls that ran while producing this assistant message, in order
-   * of execution. Populated by `useChat` after each agent-loop iteration;
-   * the user only sees them by clicking the debug icon. */
+   * of execution. Pushed live by `useChat` so the transcript can show each
+   * call as it happens — running, then resolved with output. */
   readonly toolCalls?: readonly ToolCallRecord[];
+  /** Raw chain-of-thought / "thinking" tokens emitted by the model, when
+   * the provider surfaces them (DeepSeek-R1, Qwen, Anthropic-via-proxy).
+   * Streamed in alongside `content`; rendered as a collapsible block. */
+  readonly reasoning?: string;
+  readonly reasoningStatus?: "streaming" | "complete";
 }
 
 export interface SessionRecord {
@@ -175,6 +186,12 @@ export interface SessionRecord {
   readonly createdAt: Timestamp;
   readonly updatedAt: Timestamp;
   readonly transcript: readonly TranscriptMessage[];
+  /** Context-reset boundary. Messages with `createdAt` strictly less than
+   * this timestamp stay visible in the transcript but are excluded from the
+   * model-side message stack — used to drop stale conversation history
+   * without losing the visible record. Cleared / reset by clicking the
+   * context-usage chip in the composer. */
+  readonly contextResetAt?: Timestamp;
 }
 
 export type SessionKey = `${WorkspaceId}::${SessionId}`;

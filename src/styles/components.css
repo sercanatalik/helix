@@ -560,6 +560,117 @@
   color: var(--danger-raw, #c53030);
   line-height: 1.4;
 }
+.mcp-menu-subgroups {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mcp-menu-subsection {
+  display: flex;
+  flex-direction: column;
+}
+.mcp-menu-subsection-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.mcp-menu-subsection-head:hover {
+  background: var(--bg-elev-2);
+}
+.mcp-menu-subsection-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mcp-menu-subsection-head .mcp-menu-section-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+.mcp-tool-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 10px 8px 44px;
+  margin: 0;
+  list-style: none;
+}
+.mcp-tool-chip-li {
+  display: flex;
+  list-style: none;
+}
+.mcp-tool-chip {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.2;
+  padding: 3px 8px 3px 7px;
+  border-radius: 999px;
+  background: var(--bg-elev-1);
+  color: var(--fg-muted);
+  border: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 120ms ease, background 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.mcp-tool-chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--fg-dim);
+  flex: 0 0 auto;
+}
+.mcp-tool-chip[data-kind="tool"]::before {
+  background: var(--accent, #6aa9ff);
+}
+.mcp-tool-chip[data-kind="prompt"]::before {
+  background: #b58cff;
+}
+.mcp-tool-chip[data-kind="resource"]::before {
+  background: #f0b25c;
+}
+.mcp-tool-chip[data-off] {
+  opacity: 0.4;
+}
+.mcp-tool-chip[data-error] {
+  border-color: var(--danger-raw, #c53030);
+  color: var(--danger-raw, #c53030);
+}
+button.mcp-tool-chip {
+  cursor: pointer;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+button.mcp-tool-chip:hover:not(:disabled) {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+}
+button.mcp-tool-chip:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.mcp-tool-chip[data-running] {
+  animation: mcp-chip-pulse 1.2s ease-in-out infinite;
+}
+@keyframes mcp-chip-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
 .mcp-menu-items {
   list-style: none;
   padding: 0;
@@ -700,6 +811,10 @@
   background: var(--accent-ring);
   border-color: var(--accent-ring);
 }
+.mcp-switch-pill[data-placeholder] {
+  visibility: hidden;
+  pointer-events: none;
+}
 .mcp-switch-thumb {
   position: absolute;
   top: 1px;
@@ -732,6 +847,92 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 200px;
+}
+
+/* ---------- Model picker chip + dropdown ---------- */
+.model-chip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.model-chip .model-chip-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  min-width: 280px;
+  max-width: 360px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-raw);
+  background: var(--bg-elev);
+  border-radius: 12px;
+  box-shadow: 0 -12px 32px -12px rgba(0, 0, 0, 0.3);
+  max-height: 360px;
+  overflow: hidden;
+}
+.model-menu-items {
+  overflow-y: auto;
+  padding: 4px;
+  margin: 0;
+  list-style: none;
+  max-height: 280px;
+}
+
+/* ---------- Context window usage chip ---------- */
+.context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elev);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.context-chip-bar {
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+.context-chip-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent-raw);
+  transition: width 200ms ease;
+}
+.context-chip[data-tone="warn"] .context-chip-fill {
+  background: oklch(0.78 0.18 75);
+}
+.context-chip[data-tone="warn"] {
+  color: oklch(0.78 0.18 75);
+  border-color: oklch(from var(--fg-muted) l c h / 0.4);
+}
+.context-chip[data-tone="danger"] .context-chip-fill {
+  background: var(--danger);
+}
+.context-chip[data-tone="danger"] {
+  color: var(--danger);
+  border-color: oklch(from var(--danger) l c h / 0.4);
+}
+.context-chip-pct {
+  letter-spacing: -0.01em;
+  min-width: 28px;
+  text-align: right;
 }
 .composer-card {
   position: relative;
@@ -791,129 +992,213 @@
   padding: 6px 10px;
   border-radius: 6px;
 }
-/* ---------- Tool-call debug toggle on assistant messages ---------- */
-.msg-tool-debug {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+/* ---------- Reasoning ("Thinking…") block on assistant messages ---------- */
+.thinking-block {
+  margin: 0 0 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  overflow: hidden;
 }
-.msg-tool-debug-toggle {
-  align-self: flex-start;
-  display: inline-flex;
+.thinking-block[data-streaming] {
+  border-color: color-mix(in oklab, var(--accent-raw) 22%, var(--border-subtle));
+}
+.thinking-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  transition: color 120ms ease, background 120ms ease;
+}
+.thinking-head:hover {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--fg-muted) 5%, transparent);
+}
+.thinking-block[data-open] .thinking-head {
+  color: var(--fg);
+}
+.thinking-label {
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+.thinking-block[data-streaming] .thinking-label {
+  color: var(--fg);
+  background: linear-gradient(
+    90deg,
+    var(--fg) 0%,
+    var(--fg) 30%,
+    var(--accent-raw) 50%,
+    var(--fg) 70%,
+    var(--fg) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: helix-thinking-shimmer 2.4s linear infinite;
+}
+@keyframes helix-thinking-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.thinking-head .tool-card-chevron {
+  margin-left: auto;
+  color: var(--fg-dim);
+}
+.thinking-body {
+  padding: 4px 10px 10px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg);
+  max-height: 280px;
+  overflow-y: auto;
+}
+.thinking-text {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- Streaming status (Claude Code parity) ----------
+ * One row: rotating verb followed by a blinking caret. No status dot —
+ * the caret carries the "still working" signal. */
+.streaming-status {
+  display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px 4px 7px;
-  border-radius: 6px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg);
-  color: var(--fg-muted);
-  font-size: 11px;
+  margin: 0 0 10px;
   font-family: var(--font-sans);
-  cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  font-size: 12.5px;
+  color: var(--fg-muted);
 }
-.msg-tool-debug-toggle:hover {
-  color: var(--fg);
-  border-color: var(--border-strong);
-  background: var(--bg-elev);
+.streaming-status-verb {
+  background: linear-gradient(
+    90deg,
+    var(--fg-muted) 0%,
+    var(--fg-muted) 30%,
+    var(--accent-raw) 50%,
+    var(--fg-muted) 70%,
+    var(--fg-muted) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: helix-thinking-shimmer 2.4s linear infinite;
+  font-weight: 500;
 }
-.msg-tool-debug-toggle[data-open] {
-  color: var(--fg);
-  border-color: var(--border-strong);
-  background: var(--bg-elev);
-}
-.msg-tool-debug-toggle[data-has-errors] {
-  border-color: color-mix(in oklab, var(--danger-raw, #c53030) 30%, transparent);
-}
-.msg-tool-debug-error-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--danger-raw, #c53030);
+
+/* Reusable terminal-style caret. Used inline next to a rotating verb in
+ * StreamingStatus and in the ReasoningBlock head while it's streaming. */
+.blinking-cursor {
   display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  vertical-align: -0.18em;
+  background: var(--accent-raw);
+  border-radius: 1px;
+  flex-shrink: 0;
+  animation: helix-cursor-blink 1.05s steps(2) infinite;
 }
-.msg-tool-call-list {
+@keyframes helix-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ---------- Inline tool-call rows (Claude Code style) ----------
+ * One flat line per call: status dot · tool name · (args preview) · duration.
+ * No expansion, no artifact pane — the result is implicit in the next text
+ * block the model produces. */
+.tool-block {
   list-style: none;
-  margin: 0;
+  margin: 0 0 12px;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
 }
-.msg-tool-call {
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--bg);
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.msg-tool-call[data-error] {
-  border-color: color-mix(in oklab, var(--danger-raw, #c53030) 35%, transparent);
-  background: color-mix(in oklab, var(--danger-raw, #c53030) 4%, var(--bg));
-}
-.msg-tool-call-head {
+.tool-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  padding: 2px 0;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  min-width: 0;
 }
-.msg-tool-call-index {
+.tool-row[data-status="error"] {
+  color: var(--danger, var(--danger-raw, #c53030));
+}
+.tool-row-name {
   font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--fg-dim);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  flex-shrink: 0;
 }
-.msg-tool-call-name {
+.tool-row[data-status="error"] .tool-row-name {
+  color: var(--danger, var(--danger-raw, #c53030));
+}
+.tool-row-args {
   font-family: var(--font-mono);
   font-size: 11.5px;
-  color: var(--fg);
-  font-weight: 600;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
 }
-.msg-tool-call-tag {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: color-mix(in oklab, var(--danger-raw, #c53030) 14%, transparent);
-  color: var(--danger-raw, #c53030);
-  font-weight: 600;
-}
-.msg-tool-call-duration {
-  margin-left: auto;
+.tool-row-duration {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--fg-dim);
+  flex-shrink: 0;
 }
-.msg-tool-call-section {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.tool-status-icon {
+  flex-shrink: 0;
 }
-.msg-tool-call-section-label {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.tool-status-icon[data-status="complete"] {
+  color: var(--success, var(--accent-raw));
+}
+.tool-status-icon[data-status="error"] {
+  color: var(--danger-raw, #c53030);
+}
+.tool-status-spin {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.6px solid color-mix(in oklab, var(--accent-raw) 22%, transparent);
+  border-top-color: var(--accent-raw);
+  animation: helix-tool-spin 0.85s linear infinite;
+}
+@keyframes helix-tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Chevron for the Thinking block — kept in the tool namespace so the icon
+ * component stays single-source. */
+.tool-card-chevron {
   color: var(--fg-dim);
-}
-.msg-tool-call-section-body {
-  margin: 0;
-  padding: 6px 8px;
-  border-radius: 4px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-subtle);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--fg);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 240px;
-  overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .msg[data-status="error"] .msg-content {
@@ -1779,6 +2064,47 @@
 .vega-chart .vega-embed {
   width: 100%;
   font-family: var(--font-sans);
+}
+/* Toolbar of save actions anchored to the chart's top-right corner. The
+ * group is positioned absolutely; individual buttons are subtle by default
+ * and light up on chart hover or keyboard focus. Handlers live in
+ * vega-chart-impl.tsx — currently PNG and CSV. */
+.vega-chart-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: inline-flex;
+  gap: 4px;
+}
+.vega-chart-save {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  color: var(--fg-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease,
+    background 120ms ease;
+}
+.vega-chart:hover .vega-chart-save,
+.vega-chart-save:focus-visible {
+  opacity: 1;
+}
+.vega-chart-save:hover {
+  color: var(--fg);
+  border-color: var(--border-raw);
+  background: var(--bg-elev-2);
+}
+.vega-chart-save:focus-visible {
+  outline: 2px solid var(--accent-raw);
+  outline-offset: 1px;
 }
 /* The vega-embed action menu — three-dot button + dropdown for "save as png"
  * etc. Default styling is a generic browser dropdown; restyle to match the

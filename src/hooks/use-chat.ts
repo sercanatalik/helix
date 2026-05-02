@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { buildExtraBody, createClient } from "../lib/llm/client";
+import { isReasoningModel } from "../lib/llm/model-traits";
 import type {
   ChatMessage,
   ChatTool,
@@ -12,6 +13,19 @@ import type { ToolCallRecord, TranscriptMessage } from "../app/types";
  * a misbehaving model that keeps re-issuing the same tool call without ever
  * emitting a final assistant message. */
 const MAX_TOOL_ITERATIONS = 8;
+
+/** Default ceiling on completion tokens for non-reasoning models.
+ * Overridable via the provider's extra_params, which merge in last. */
+const DEFAULT_MAX_TOKENS = 8192;
+
+/** Reasoning models (`o1*`, `o3*`, `o4*`, `gpt-5*`) burn a *lot* of tokens
+ * internally before any visible output — a hard prompt on gpt-5 can chew
+ * through 20-30K reasoning tokens with nothing user-facing yet, then 400
+ * with "max_tokens reached". The legacy 8192 default starves them. Give
+ * reasoning models 32K headroom by default; users can still override
+ * via extra_params. */
+const DEFAULT_REASONING_MAX_TOKENS = 32_768;
+
 
 /** OpenAI's function-name limit. Names also must match `[A-Za-z0-9_-]+`.
  * Kept as the lowest common denominator across providers we target. */
@@ -37,18 +51,31 @@ export interface ChatExtras {
    * tool-call loop internally and never adds tool exchange to the transcript;
    * only the final assistant text is rendered. */
   readonly mcpTools?: readonly McpToolBinding[];
+  /** Per-send model override. Falls back to `provider.model` when omitted —
+   * lets the composer's model switcher pick a model without mutating the
+   * persisted provider config. */
+  readonly model?: string;
 }
 
 export interface UseChatOptions {
   readonly provider: ProviderConfig | undefined;
   readonly messages: readonly TranscriptMessage[];
   readonly onMessagesChange: (next: readonly TranscriptMessage[]) => void;
+  /** Context-reset boundary. Transcript messages with `createdAt` strictly
+   * less than this timestamp stay visible to the user but are dropped from
+   * the API-side message stack. Undefined means "send the full transcript",
+   * matching the pre-feature behaviour. */
+  readonly contextResetAt?: string;
 }
 
 export interface UseChatResult {
   readonly isStreaming: boolean;
   readonly error: string | null;
   readonly send: (text: string, extras?: ChatExtras) => Promise<void>;
+  /** Abort the in-flight stream. The current assistant message stays in the
+   * transcript with whatever content arrived before the stop; status flips
+   * to "complete" so it renders normally. No-op when nothing is streaming. */
+  readonly stop: () => void;
 }
 
 function newId(prefix: string): string {
@@ -211,7 +238,7 @@ async function runToolCall(
  * `role: "tool"` API messages. Only the final assistant text reaches the
  * transcript — the user never sees the tool exchange. */
 export function useChat(options: UseChatOptions): UseChatResult {
-  const { provider, messages, onMessagesChange } = options;
+  const { provider, messages, onMessagesChange, contextResetAt } = options;
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -219,12 +246,23 @@ export function useChat(options: UseChatOptions): UseChatResult {
   // re-creating itself on every chunk (which would also re-render Composer).
   const messagesRef = useRef<readonly TranscriptMessage[]>(messages);
   const onChangeRef = useRef(onMessagesChange);
+  const contextResetAtRef = useRef<string | undefined>(contextResetAt);
+  // The AbortController controlling the active stream. Lives in a ref so the
+  // stable `stop` callback can reach it without reattaching to every chunk.
+  const abortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
   useEffect(() => {
     onChangeRef.current = onMessagesChange;
   }, [onMessagesChange]);
+  useEffect(() => {
+    contextResetAtRef.current = contextResetAt;
+  }, [contextResetAt]);
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   const patch = useCallback(
     (
@@ -245,7 +283,10 @@ export function useChat(options: UseChatOptions): UseChatResult {
         setError("No provider configured. Add one in Settings → Providers.");
         return;
       }
-      if (!provider.model) {
+      // The composer-side switcher can pick a model even when the provider
+      // has no default; only error when neither is available.
+      const chosenModel = extras?.model || provider.model;
+      if (!chosenModel) {
         setError(`Provider "${provider.name}" has no default model set.`);
         return;
       }
@@ -271,10 +312,18 @@ export function useChat(options: UseChatOptions): UseChatResult {
       patch(() => [...transcriptHistory, assistantStub]);
       setIsStreaming(true);
 
+      // One controller per send; `stop()` aborts it and the for-await loop
+      // below exits via the catch arm.
+      const ac = new AbortController();
+      abortRef.current = ac;
+
       // Build the initial API-side message stack: hidden system context
       // first (prompts / resources the user selected), then the visible
       // transcript. The transcript-side `messagesRef` never sees the system
       // context — it stays a property of this single send invocation.
+      // Honour the context-reset boundary: messages older than the cutoff
+      // stay in the visible transcript but are dropped from the model-side
+      // stack so the user can prune long sessions without losing scrollback.
       const apiMessages: ChatMessage[] = [];
       if (extras?.systemContext?.length) {
         for (const ctx of extras.systemContext) {
@@ -283,7 +332,11 @@ export function useChat(options: UseChatOptions): UseChatResult {
           }
         }
       }
-      apiMessages.push(...transcriptHistory.map(toApiMessage));
+      const cutoff = contextResetAtRef.current;
+      const sendableHistory = cutoff
+        ? transcriptHistory.filter((m) => m.createdAt >= cutoff)
+        : transcriptHistory;
+      apiMessages.push(...sendableHistory.map(toApiMessage));
 
       const { tools, resolve: resolveTool } = buildToolPayload(
         extras?.mcpTools ?? [],
@@ -297,22 +350,55 @@ export function useChat(options: UseChatOptions): UseChatResult {
       try {
         const client = createClient(provider);
         let finalContent = "";
-        // Recorded across every iteration of the loop so the debug icon on
-        // the finished assistant message can replay the full exchange.
+        // Recorded across every iteration of the loop and patched live into
+        // the streaming assistant message so the transcript can render each
+        // tool call as soon as the model commits to it. We mutate this array
+        // in place and re-snapshot it (`[...callRecords]`) into the patch
+        // closure so React sees a fresh reference per update.
         const callRecords: ToolCallRecord[] = [];
+        // Reasoning text accumulated across every iteration — providers can
+        // emit thinking before each tool call as well as before the final
+        // response, so we keep one buffer per assistant message.
+        let reasoningAcc = "";
         // Vega-Lite blocks salvaged from tool results — appended to the
         // assistant message at the end so charts render whether or not the
         // model echoes the spec.
         const harvestedCharts: string[] = [];
 
+        const patchCallRecords = () => {
+          const snapshot = callRecords.map((r) => ({ ...r }));
+          patch((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, toolCalls: snapshot } : m,
+            ),
+          );
+        };
+
         for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
-          const stream = client.chatStream({
-            model: provider.model,
-            messages: apiMessages,
-            tools: tools.length > 0 ? tools : undefined,
-            tool_choice: tools.length > 0 ? "auto" : undefined,
-            ...buildExtraBody(provider),
-          });
+          if (ac.signal.aborted) break;
+          // Reasoning models reject `max_tokens` and require
+          // `max_completion_tokens`; they also need a much larger budget
+          // because reasoning tokens are billed against the same cap.
+          // Either is overridable via the provider's extra_params, which
+          // merge in last and win.
+          const reasoning = isReasoningModel(chosenModel);
+          const tokenLimitField = reasoning
+            ? "max_completion_tokens"
+            : "max_tokens";
+          const tokenLimit = reasoning
+            ? DEFAULT_REASONING_MAX_TOKENS
+            : DEFAULT_MAX_TOKENS;
+          const stream = client.chatStream(
+            {
+              model: chosenModel,
+              messages: apiMessages,
+              tools: tools.length > 0 ? tools : undefined,
+              tool_choice: tools.length > 0 ? "auto" : undefined,
+              [tokenLimitField]: tokenLimit,
+              ...buildExtraBody(provider),
+            },
+            { signal: ac.signal },
+          );
 
           let acc = "";
           const toolCalls: AccumulatedToolCall[] = [];
@@ -338,6 +424,27 @@ export function useChat(options: UseChatOptions): UseChatResult {
                   entry.arguments += tc.function.arguments;
                 }
               }
+            }
+
+            // Reasoning tokens. Providers split on field name; coalesce into
+            // one buffer and patch live so the Thinking block updates as the
+            // model thinks.
+            const reasoningDelta =
+              delta?.reasoning_content ?? delta?.reasoning;
+            if (reasoningDelta) {
+              reasoningAcc += reasoningDelta;
+              const snapshot = reasoningAcc;
+              patch((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? {
+                        ...m,
+                        reasoning: snapshot,
+                        reasoningStatus: "streaming",
+                      }
+                    : m,
+                ),
+              );
             }
 
             if (delta?.content) {
@@ -393,6 +500,25 @@ export function useChat(options: UseChatOptions): UseChatResult {
               tool_calls: dispatched.map((d) => d.payload),
             });
 
+            // Push every call onto the transcript as "running" before we
+            // dispatch them, so the UI shows them immediately. Each will be
+            // patched in place below as the MCP server replies.
+            const recordIndex = new Map<string, number>();
+            for (const { tc, callId } of dispatched) {
+              const binding = resolveTool(tc.name);
+              recordIndex.set(callId, callRecords.length);
+              callRecords.push({
+                id: callId,
+                serverId: binding?.serverId ?? "?",
+                toolName: binding?.toolName ?? tc.name,
+                arguments: tc.arguments || "{}",
+                result: "",
+                status: "running",
+                isError: false,
+              });
+            }
+            patchCallRecords();
+
             for (const { tc, callId } of dispatched) {
               const binding = resolveTool(tc.name);
               const startedAt = performance.now();
@@ -406,15 +532,18 @@ export function useChat(options: UseChatOptions): UseChatResult {
                   harvestedCharts.push(block);
                 }
               }
-              callRecords.push({
-                id: callId,
-                serverId: binding?.serverId ?? "?",
-                toolName: binding?.toolName ?? tc.name,
-                arguments: tc.arguments || "{}",
-                result: toolResult,
-                isError,
-                durationMs: Math.round(performance.now() - startedAt),
-              });
+              const idx = recordIndex.get(callId);
+              const existing = idx !== undefined ? callRecords[idx] : undefined;
+              if (idx !== undefined && existing) {
+                callRecords[idx] = {
+                  ...existing,
+                  result: toolResult,
+                  status: isError ? "error" : "complete",
+                  isError,
+                  durationMs: Math.round(performance.now() - startedAt),
+                };
+                patchCallRecords();
+              }
               apiMessages.push({
                 role: "tool",
                 tool_call_id: callId,
@@ -452,31 +581,81 @@ export function useChat(options: UseChatOptions): UseChatResult {
                   ...m,
                   content: finalContent,
                   status: "complete",
-                  toolCalls: callRecords.length > 0 ? callRecords : undefined,
+                  toolCalls:
+                    callRecords.length > 0
+                      ? callRecords.map((r) => ({ ...r }))
+                      : undefined,
+                  reasoning: reasoningAcc || undefined,
+                  reasoningStatus: reasoningAcc ? "complete" : undefined,
                 }
               : m,
           ),
         );
       } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        setError(detail);
-        patch((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? {
-                  ...m,
-                  status: "error",
-                  content: m.content || `**Error:** ${detail}`,
-                }
-              : m,
-          ),
-        );
+        // User-initiated abort: keep whatever streamed in, mark complete.
+        // Cleared assistant content gets a small placeholder so the row
+        // doesn't render as a blank bubble.
+        if (
+          ac.signal.aborted ||
+          (err as { name?: string } | null)?.name === "AbortError"
+        ) {
+          patch((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? {
+                    ...m,
+                    status: "complete",
+                    content: m.content || "_(stopped)_",
+                    reasoningStatus: m.reasoning ? "complete" : undefined,
+                    // Mark any still-running tool calls as errored so the
+                    // UI stops the spinner.
+                    toolCalls: m.toolCalls?.map((c) =>
+                      c.status === "running"
+                        ? {
+                            ...c,
+                            status: "error",
+                            isError: true,
+                            result: c.result || "(stopped)",
+                          }
+                        : c,
+                    ),
+                  }
+                : m,
+            ),
+          );
+        } else {
+          const detail = err instanceof Error ? err.message : String(err);
+          setError(detail);
+          patch((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? {
+                    ...m,
+                    status: "error",
+                    content: m.content || `**Error:** ${detail}`,
+                    reasoningStatus: m.reasoning ? "complete" : undefined,
+                    toolCalls: m.toolCalls?.map((c) =>
+                      c.status === "running"
+                        ? {
+                            ...c,
+                            status: "error",
+                            isError: true,
+                            result: c.result || `(stream failed: ${detail})`,
+                          }
+                        : c,
+                    ),
+                  }
+                : m,
+            ),
+          );
+        }
       } finally {
+        if (abortRef.current === ac) abortRef.current = null;
         setIsStreaming(false);
       }
     },
     [provider, isStreaming, patch],
   );
 
-  return { isStreaming, error, send };
+  return { isStreaming, error, send, stop };
 }

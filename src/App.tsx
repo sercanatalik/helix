@@ -155,6 +155,7 @@ export function App() {
               activeWorkspace={workspacesApi.activeWorkspace}
               activeSession={sessionsApi.activeSession}
               setMessages={sessionsApi.setMessages}
+              setContextResetAt={sessionsApi.setContextResetAt}
               createSession={sessionsApi.createSession}
             />
           </>
@@ -183,6 +184,10 @@ interface ChatViewProps {
     id: string,
     messages: readonly TranscriptMessage[],
   ) => void;
+  readonly setContextResetAt: (
+    id: string,
+    timestamp: string | undefined,
+  ) => void;
   readonly createSession: () => string;
 }
 
@@ -190,10 +195,23 @@ function ChatView({
   activeWorkspace,
   activeSession,
   setMessages,
+  setContextResetAt,
   createSession,
 }: ChatViewProps) {
   const { activeProvider } = useProviders();
   const messages = activeSession?.transcript ?? EMPTY_MESSAGES;
+  const contextResetAt = activeSession?.contextResetAt;
+  // Per-session model override. Kept here (not in ProviderConfig) so picking
+  // a model from the composer doesn't mutate the persisted provider — it's
+  // a transient choice that resets when the user switches providers.
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(
+    undefined,
+  );
+  // Reset the override whenever the provider changes — a model id from one
+  // provider isn't necessarily valid on another.
+  useEffect(() => {
+    setSelectedModel(undefined);
+  }, [activeProvider?.id]);
 
   // Track the active session id in a ref so streaming chunks within one
   // send() flow don't see a stale undefined and re-create on every chunk.
@@ -214,32 +232,47 @@ function ChatView({
     [createSession, setMessages],
   );
 
-  const { isStreaming, error, send } = useChat({
+  const onResetContext = useCallback(() => {
+    const id = activeIdRef.current;
+    if (!id) return;
+    setContextResetAt(id, new Date().toISOString());
+  }, [setContextResetAt]);
+
+  const { isStreaming, error, send, stop } = useChat({
     provider: activeProvider,
     messages,
     onMessagesChange,
+    contextResetAt,
   });
 
+  const hasModel = !!(selectedModel || activeProvider?.model);
   const hint = error
     ? error
     : !activeProvider
       ? "No enabled provider. Add one in Settings → Providers."
-      : !activeProvider.model
-        ? `Provider "${activeProvider.name}" has no default model — set one in Settings.`
+      : !hasModel
+        ? `Provider "${activeProvider.name}" has no default model — pick one or set one in Settings.`
         : undefined;
 
   return (
     <>
       {activeSession ? (
-        <Transcript messages={messages} />
+        <Transcript messages={messages} contextResetAt={contextResetAt} />
       ) : (
         <EmptyChat workspaceName={activeWorkspace?.displayName} />
       )}
       <Composer
         onSend={(text, extras) => void send(text, extras)}
-        disabled={isStreaming || !activeProvider || !activeProvider.model}
+        onStop={stop}
+        disabled={!activeProvider || !hasModel}
+        isStreaming={isStreaming}
         hint={hint}
-        modelLabel={activeProvider?.model}
+        provider={activeProvider}
+        selectedModel={selectedModel}
+        onSelectModel={setSelectedModel}
+        messages={messages}
+        contextResetAt={contextResetAt}
+        onResetContext={onResetContext}
       />
     </>
   );

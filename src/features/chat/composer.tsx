@@ -8,8 +8,15 @@ import {
 } from "react";
 import { Button, Kbd } from "../../components/ui";
 import { useMcpServers } from "../../hooks/use-mcp-servers";
+import { useModels } from "../../hooks/use-models";
 import { useSkills } from "../../hooks/use-skills";
 import type { ChatExtras, McpToolBinding } from "../../hooks/use-chat";
+import type { ProviderConfig } from "../../features/providers";
+import {
+  contextWindowFor,
+  estimateMessageTokens,
+  estimateTokens,
+} from "../../lib/llm/context-window";
 import type {
   McpPromptInfo,
   McpResourceInfo,
@@ -17,6 +24,7 @@ import type {
   McpServerRuntime,
   McpToolInfo,
   Skill,
+  TranscriptMessage,
 } from "../../app/types";
 
 interface ComposerProps {
@@ -25,9 +33,28 @@ interface ComposerProps {
    * messages, and the set of MCP tools the model may call. None of it
    * appears in the transcript. */
   readonly onSend: (text: string, extras: ChatExtras) => void;
+  /** Stop the current streaming response. The composer shows a stop button
+   * in place of send while `isStreaming` is true. */
+  readonly onStop?: () => void;
+  /** Disabled for non-streaming reasons (no provider, no model). */
   readonly disabled?: boolean;
+  /** True while a response is streaming — flips Send into Stop. */
+  readonly isStreaming?: boolean;
   readonly hint?: string;
-  readonly modelLabel?: string;
+  /** Provider in use — drives the model picker and `/models` discovery. */
+  readonly provider?: ProviderConfig;
+  /** Model id selected by the user, or undefined to use provider default. */
+  readonly selectedModel?: string;
+  readonly onSelectModel?: (model: string) => void;
+  /** Visible transcript messages — feeds the context window indicator. */
+  readonly messages?: readonly TranscriptMessage[];
+  /** Timestamp of the most recent context reset. Messages older than this
+   * are still rendered in the transcript but no longer count against the
+   * model's context window. */
+  readonly contextResetAt?: string;
+  /** Reset the conversation's model-side context. Triggered by clicking the
+   * context-usage chip. The visible transcript is left intact. */
+  readonly onResetContext?: () => void;
 }
 
 /** A prompt or resource the user has loaded into context for the next
@@ -43,12 +70,6 @@ interface PendingContextEntry {
 
 type ChipKind = "tools" | "prompts" | "resources";
 
-const CHIP_LABELS: Readonly<Record<ChipKind, string>> = {
-  tools: "tools",
-  prompts: "prompts",
-  resources: "resources",
-};
-
 interface ServerGroup<T> {
   readonly server: McpServerConfig;
   readonly items: readonly T[];
@@ -57,12 +78,22 @@ interface ServerGroup<T> {
 
 export function Composer({
   onSend,
+  onStop,
   disabled = false,
+  isStreaming = false,
   hint,
-  modelLabel,
+  provider,
+  selectedModel,
+  onSelectModel,
+  messages,
+  contextResetAt,
+  onResetContext,
 }: ComposerProps) {
   const [text, setText] = useState("");
-  const [open, setOpen] = useState<ChipKind | null>(null);
+  const [open, setOpen] = useState<boolean>(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState<boolean>(false);
+  const activeModel = selectedModel || provider?.model;
+  const modelsApi = useModels(provider);
   // Per-item invocation state — `${serverId}::${name|uri}` → "running" or
   // an error message. We display loading + failure inline next to the row
   // that triggered it instead of a global toast.
@@ -75,7 +106,10 @@ export function Composer({
     readonly PendingContextEntry[]
   >([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const canSend = text.trim().length > 0 && !disabled;
+  const mcpTriggerRef = useRef<HTMLButtonElement>(null);
+  const mcpPopoverRef = useRef<HTMLDivElement>(null);
+  const canSend =
+    text.trim().length > 0 && !disabled && !isStreaming && !!activeModel;
 
   const { servers, runtime, setToolEnabled, setPromptEnabled } =
     useMcpServers();
@@ -96,6 +130,22 @@ export function Composer({
   useEffect(() => {
     setSlashHighlight(0);
   }, [slash?.query, slashCandidates.length]);
+
+  // Close the MCP popover on any mousedown outside the trigger or the
+  // popover itself. mousedown (not click) so the popover dismisses before
+  // focus shifts into the textarea or another control.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (mcpTriggerRef.current?.contains(target)) return;
+      if (mcpPopoverRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
 
   /** Discoverable skills shown to the model on every send. Mirrors Claude
    * Desktop's "metadata always pre-loaded" behaviour: name + description
@@ -166,9 +216,9 @@ export function Composer({
 
   const anyConnected = groups.tools.length > 0;
 
-  const toggle = (kind: ChipKind) => {
+  const togglePopover = () => {
     if (!anyConnected) return;
-    setOpen((curr) => (curr === kind ? null : kind));
+    setOpen((curr) => !curr);
   };
 
   const setRunning = (key: string) =>
@@ -248,7 +298,7 @@ export function Composer({
     const entryId = `resource:${server.id}:${resource.uri}`;
     const key = `${server.id}::resource::${resource.uri}`;
     if (pendingContext.some((p) => p.id === entryId)) {
-      setOpen(null);
+      setOpen(false);
       return;
     }
     setRunning(key);
@@ -271,33 +321,11 @@ export function Composer({
           result.content,
       });
       clearItem(key);
-      setOpen(null);
+      setOpen(false);
     } catch (err) {
       setItemError(key, err instanceof Error ? err.message : String(err));
     }
   };
-
-  /** Persistent indicators for prompts the user has toggled on. Same chip
-   * style as one-shot resources, but the × calls back into the toggle so the
-   * change persists in `enabledPrompts`. Recomputed on every server-state
-   * push so toggles applied from anywhere stay in sync. */
-  const enabledPromptChips = useMemo(() => {
-    const out: { id: string; serverId: string; promptName: string; serverName: string }[] = [];
-    for (const group of groups.prompts) {
-      const enabled = new Set(group.server.enabledPrompts ?? []);
-      for (const prompt of group.items) {
-        if (enabled.has(prompt.name)) {
-          out.push({
-            id: `prompt:${group.server.id}:${prompt.name}`,
-            serverId: group.server.id,
-            promptName: prompt.name,
-            serverName: group.server.name,
-          });
-        }
-      }
-    }
-    return out;
-  }, [groups.prompts]);
 
   /** Build the McpToolBinding list passed to the chat hook. We include every
    * advertised tool from a *connected* server that hasn't been disabled by
@@ -347,6 +375,7 @@ export function Composer({
         ...skillContext,
       ],
       mcpTools: mcpToolBindings,
+      model: selectedModel,
     };
     onSend(userText, extras);
   }
@@ -411,59 +440,43 @@ export function Composer({
         {hint ? <div className="composer-status">{hint}</div> : null}
         <div className="composer-tools">
           <ToolChip
+            buttonRef={mcpTriggerRef}
             icon={<WrenchIcon />}
-            label="Tools"
-            count={`${counts.tools}/${totals.tools}`}
-            active={open === "tools"}
+            label="MCP"
+            count={`${counts.tools + counts.prompts}/${totals.tools + totals.prompts + totals.resources}`}
+            active={open}
             disabled={!anyConnected}
-            onClick={() => toggle("tools")}
+            onClick={togglePopover}
           />
-          <ToolChip
-            icon={<SparkleIcon />}
-            label="Prompts"
-            count={`${counts.prompts}/${totals.prompts}`}
-            active={open === "prompts"}
-            disabled={!anyConnected}
-            onClick={() => toggle("prompts")}
-          />
-          <ToolChip
-            icon={<DatabaseIcon />}
-            label="Resources"
-            count={counts.resources}
-            active={open === "resources"}
-            disabled={!anyConnected}
-            onClick={() => toggle("resources")}
+          <ContextUsageChip
+            messages={messages ?? EMPTY_TRANSCRIPT}
+            pendingContext={pendingContext}
+            modelId={activeModel}
+            contextResetAt={contextResetAt}
+            onReset={onResetContext}
           />
           <span className="composer-tools-spacer" />
-          {modelLabel ? (
-            <span className="composer-active-model">{modelLabel}</span>
+          {provider ? (
+            <ModelChip
+              activeModel={activeModel}
+              models={modelsApi.models}
+              isLoading={modelsApi.isLoading}
+              error={modelsApi.error}
+              fromEndpoint={modelsApi.fromEndpoint}
+              open={modelMenuOpen}
+              onToggle={() => setModelMenuOpen((v) => !v)}
+              onClose={() => setModelMenuOpen(false)}
+              onPick={(m) => {
+                onSelectModel?.(m);
+                setModelMenuOpen(false);
+              }}
+              onRefresh={modelsApi.refresh}
+            />
           ) : null}
         </div>
 
-        {enabledPromptChips.length > 0 || pendingContext.length > 0 ? (
+        {pendingContext.length > 0 ? (
           <div className="composer-context" role="list">
-            {enabledPromptChips.map((chip) => (
-              <span
-                key={chip.id}
-                role="listitem"
-                className="composer-context-chip"
-                data-kind="prompt"
-                title={`Prompt from ${chip.serverName} — re-fetched and injected as hidden system context every message. Click × to disable.`}
-              >
-                <span className="composer-context-kind">prompt</span>
-                <span className="composer-context-label">{chip.promptName}</span>
-                <button
-                  type="button"
-                  className="composer-context-remove"
-                  onClick={() =>
-                    void setPromptEnabled(chip.serverId, chip.promptName, false)
-                  }
-                  aria-label={`Disable prompt ${chip.promptName}`}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
             {pendingContext.map((entry) => (
               <span
                 key={entry.id}
@@ -489,18 +502,14 @@ export function Composer({
           </div>
         ) : null}
 
-        {open !== null && anyConnected ? (
+        {open && anyConnected ? (
           <McpDiscoveryPopover
-            kind={open}
-            groups={
-              open === "tools"
-                ? groups.tools
-                : open === "prompts"
-                  ? groups.prompts
-                  : groups.resources
-            }
+            popoverRef={mcpPopoverRef}
+            tools={groups.tools}
+            prompts={groups.prompts}
+            resources={groups.resources}
             itemState={itemState}
-            onClose={() => setOpen(null)}
+            onClose={() => setOpen(false)}
             onToggleTool={(serverId, toolName, nextEnabled) =>
               void setToolEnabled(serverId, toolName, nextEnabled)
             }
@@ -529,12 +538,12 @@ export function Composer({
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder={
-              disabled
+              isStreaming
                 ? "Streaming…"
                 : "Message the assistant. Type / for skills."
             }
             rows={1}
-            disabled={disabled}
+            disabled={disabled && !isStreaming}
           />
           <div className="composer-toolbar">
             <div className="composer-hint">
@@ -548,10 +557,17 @@ export function Composer({
                 <Kbd>/</Kbd> skills
               </span>
             </div>
-            <Button disabled={!canSend} onClick={() => void submit()}>
-              Send
-              <SendIcon />
-            </Button>
+            {isStreaming && onStop ? (
+              <Button variant="destructive" onClick={() => onStop()}>
+                Stop
+                <StopIcon />
+              </Button>
+            ) : (
+              <Button disabled={!canSend} onClick={() => void submit()}>
+                Send
+                <SendIcon />
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -610,6 +626,7 @@ interface ToolChipProps {
   readonly active?: boolean;
   readonly disabled?: boolean;
   readonly onClick?: () => void;
+  readonly buttonRef?: React.Ref<HTMLButtonElement>;
 }
 
 function ToolChip({
@@ -619,9 +636,11 @@ function ToolChip({
   active,
   disabled,
   onClick,
+  buttonRef,
 }: ToolChipProps) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       className="tool-chip"
       data-active={active || undefined}
@@ -645,12 +664,9 @@ function ToolChip({
 }
 
 interface McpDiscoveryPopoverProps {
-  readonly kind: ChipKind;
-  readonly groups: readonly (
-    | ServerGroup<McpToolInfo>
-    | ServerGroup<McpPromptInfo>
-    | ServerGroup<McpResourceInfo>
-  )[];
+  readonly tools: readonly ServerGroup<McpToolInfo>[];
+  readonly prompts: readonly ServerGroup<McpPromptInfo>[];
+  readonly resources: readonly ServerGroup<McpResourceInfo>[];
   readonly itemState: Readonly<
     Record<string, "running" | { error: string }>
   >;
@@ -669,41 +685,61 @@ interface McpDiscoveryPopoverProps {
     server: McpServerConfig,
     resource: McpResourceInfo,
   ) => void;
+  readonly popoverRef?: React.Ref<HTMLDivElement>;
 }
 
 function McpDiscoveryPopover({
-  kind,
-  groups,
+  tools,
+  prompts,
+  resources,
   itemState,
   onClose,
   onToggleTool,
   onTogglePrompt,
   onReadResource,
+  popoverRef,
 }: McpDiscoveryPopoverProps) {
-  const totalAdvertised = groups.reduce(
-    (acc, g) => acc + g.items.length,
-    0,
-  );
-  const headerHint =
-    kind === "tools"
-      ? "Toggle which tools the assistant can call."
-      : kind === "prompts"
-        ? "Toggle prompts on to inject them as hidden context every turn."
-        : "Click a resource to fetch and attach its contents.";
+  const totalAdvertised =
+    tools.reduce((a, g) => a + g.items.length, 0) +
+    prompts.reduce((a, g) => a + g.items.length, 0) +
+    resources.reduce((a, g) => a + g.items.length, 0);
+  const errors = [
+    ...tools
+      .filter((g) => g.listError)
+      .map((g) => ({ server: g.server, kind: "tools", error: g.listError! })),
+    ...prompts
+      .filter((g) => g.listError)
+      .map((g) => ({
+        server: g.server,
+        kind: "prompts",
+        error: g.listError!,
+      })),
+    ...resources
+      .filter((g) => g.listError)
+      .map((g) => ({
+        server: g.server,
+        kind: "resources",
+        error: g.listError!,
+      })),
+  ];
 
   return (
     <div
+      ref={popoverRef}
       className="mcp-menu"
       role="dialog"
-      aria-label={`Connected MCP ${CHIP_LABELS[kind]}`}
+      aria-label="Connected MCP servers"
     >
       <header className="mcp-menu-head">
         <div>
           <div className="mcp-menu-title">
-            {capitalize(CHIP_LABELS[kind])}
+            MCP
             <span className="mcp-menu-count">{totalAdvertised}</span>
           </div>
-          <div className="mcp-menu-hint">{headerHint}</div>
+          <div className="mcp-menu-hint">
+            Toggle a tag to enable every tool and prompt under it. Click a
+            resource chip to attach its contents.
+          </div>
         </div>
         <button
           type="button"
@@ -715,380 +751,333 @@ function McpDiscoveryPopover({
         </button>
       </header>
 
-      {totalAdvertised === 0 && groups.every((g) => !g.listError) ? (
+      {totalAdvertised === 0 && errors.length === 0 ? (
         <p className="mcp-menu-empty">
-          Connected, but no {CHIP_LABELS[kind]} were advertised by any server.
+          Connected, but no tools, prompts, or resources were advertised.
         </p>
-      ) : kind === "tools" ? (
-        <ToolsByTag
-          groups={groups as readonly ServerGroup<McpToolInfo>[]}
-          onToggleTool={onToggleTool}
-        />
-      ) : kind === "prompts" ? (
-        <PromptsByTag
-          groups={groups as readonly ServerGroup<McpPromptInfo>[]}
-          onTogglePrompt={onTogglePrompt}
-        />
       ) : (
-        <div className="mcp-menu-groups">
-          {groups.map((group) => (
-            <ServerSection
-              key={group.server.id}
-              kind={kind}
-              group={group}
-              itemState={itemState}
-              onToggleTool={onToggleTool}
-              onTogglePrompt={onTogglePrompt}
-              onReadResource={onReadResource}
-            />
-          ))}
-        </div>
+        <UnifiedByServerThenTag
+          tools={tools}
+          prompts={prompts}
+          resources={resources}
+          errors={errors}
+          itemState={itemState}
+          onToggleTool={onToggleTool}
+          onTogglePrompt={onTogglePrompt}
+          onReadResource={onReadResource}
+        />
       )}
     </div>
-  );
-}
-
-function ServerSection({
-  kind,
-  group,
-  itemState,
-  onToggleTool,
-  onTogglePrompt,
-  onReadResource,
-}: {
-  readonly kind: ChipKind;
-  readonly group:
-    | ServerGroup<McpToolInfo>
-    | ServerGroup<McpPromptInfo>
-    | ServerGroup<McpResourceInfo>;
-  readonly itemState: McpDiscoveryPopoverProps["itemState"];
-  readonly onToggleTool: McpDiscoveryPopoverProps["onToggleTool"];
-  readonly onTogglePrompt: McpDiscoveryPopoverProps["onTogglePrompt"];
-  readonly onReadResource: McpDiscoveryPopoverProps["onReadResource"];
-}) {
-  if (group.items.length === 0 && !group.listError) {
-    return null;
-  }
-  return (
-    <section className="mcp-menu-section">
-      <div className="mcp-menu-section-head">
-        <span className="mcp-menu-section-name">{group.server.name}</span>
-        <span className="mcp-menu-section-count">{group.items.length}</span>
-      </div>
-      {group.listError ? (
-        <p className="mcp-menu-section-error">
-          <strong>{CHIP_LABELS[kind]}/list</strong>: {group.listError}
-        </p>
-      ) : (
-        <ul className="mcp-menu-items">
-          {kind === "tools"
-            ? (group.items as readonly McpToolInfo[]).map((tool) => (
-                <ToolItem
-                  key={tool.name}
-                  server={group.server}
-                  tool={tool}
-                  onToggle={onToggleTool}
-                />
-              ))
-            : kind === "prompts"
-              ? (group.items as readonly McpPromptInfo[]).map((prompt) => (
-                  <PromptItem
-                    key={prompt.name}
-                    server={group.server}
-                    prompt={prompt}
-                    onToggle={onTogglePrompt}
-                  />
-                ))
-              : (group.items as readonly McpResourceInfo[]).map(
-                  (resource) => (
-                    <ResourceItem
-                      key={resource.uri}
-                      server={group.server}
-                      resource={resource}
-                      state={itemState[`${group.server.id}::resource::${resource.uri}`]}
-                      onRead={onReadResource}
-                    />
-                  ),
-                )}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function ToolItem({
-  server,
-  tool,
-  showServerName = false,
-  onToggle,
-}: {
-  readonly server: McpServerConfig;
-  readonly tool: McpToolInfo;
-  /** When the surrounding section isn't already scoped to one server (e.g.
-   * the tag-grouped view), prefix the tool name with its server so duplicate
-   * tool names across servers stay distinguishable. */
-  readonly showServerName?: boolean;
-  readonly onToggle: (
-    serverId: string,
-    toolName: string,
-    nextEnabled: boolean,
-  ) => void;
-}) {
-  const enabled = isToolEnabled(server, tool.name);
-  return (
-    <li className="mcp-menu-item mcp-menu-item-toggle">
-      <label className="mcp-menu-toggle-row">
-        <Switch
-          checked={enabled}
-          onChange={(next) => onToggle(server.id, tool.name, next)}
-          ariaLabel={`Enable tool ${tool.name}`}
-        />
-        <span className="mcp-menu-toggle-label">
-          {showServerName ? (
-            <span className="mcp-menu-item-server">{server.name}·</span>
-          ) : null}
-          <code className="mcp-menu-item-name">{tool.name}</code>
-          {tool.description ? (
-            <>
-              <span className="mcp-menu-item-sep"> — </span>
-              <span className="mcp-menu-item-desc-inline">
-                {tool.description}
-              </span>
-            </>
-          ) : null}
-        </span>
-      </label>
-    </li>
   );
 }
 
 const UNTAGGED = "Untagged";
 
-interface TagBucket<T> {
-  readonly tag: string;
-  readonly entries: ReadonlyArray<{
-    readonly server: McpServerConfig;
-    readonly item: T;
-  }>;
+interface UnifiedItem {
+  readonly server: McpServerConfig;
+  readonly kind: "tool" | "prompt" | "resource";
+  /** Stable key per item: tool/prompt name, or resource uri. */
+  readonly id: string;
+  /** Display text on the chip. */
+  readonly label: string;
+  readonly description: string | undefined;
+  readonly tags: readonly string[];
+  /** Resource-only — passed back to onReadResource on click. */
+  readonly resource?: McpResourceInfo;
 }
 
-/** Bucket every (server, item) pair under each of its tags. An item with N
- * tags appears in N buckets; an item with no tags lands in `Untagged`. Tag
- * buckets are sorted alphabetically with `Untagged` last. */
-function bucketByTag<T>(
-  groups: readonly ServerGroup<T>[],
-  getTags: (item: T) => readonly string[] | undefined,
-): readonly TagBucket<T>[] {
-  const buckets = new Map<string, Array<{ server: McpServerConfig; item: T }>>();
-  for (const group of groups) {
-    for (const item of group.items) {
-      const t = getTags(item);
-      const tags = t && t.length > 0 ? t : [UNTAGGED];
-      for (const tag of tags) {
-        let list = buckets.get(tag);
-        if (!list) {
-          list = [];
-          buckets.set(tag, list);
-        }
-        list.push({ server: group.server, item });
+interface UnifiedTagBucket {
+  readonly tag: string;
+  readonly items: readonly UnifiedItem[];
+}
+
+function tagsOrUntagged(tags: readonly string[] | undefined): readonly string[] {
+  return tags && tags.length > 0 ? tags : [UNTAGGED];
+}
+
+function UnifiedByServerThenTag({
+  tools,
+  prompts,
+  resources,
+  errors,
+  itemState,
+  onToggleTool,
+  onTogglePrompt,
+  onReadResource,
+}: {
+  readonly tools: readonly ServerGroup<McpToolInfo>[];
+  readonly prompts: readonly ServerGroup<McpPromptInfo>[];
+  readonly resources: readonly ServerGroup<McpResourceInfo>[];
+  readonly errors: readonly {
+    readonly server: McpServerConfig;
+    readonly kind: string;
+    readonly error: string;
+  }[];
+  readonly itemState: McpDiscoveryPopoverProps["itemState"];
+  readonly onToggleTool: McpDiscoveryPopoverProps["onToggleTool"];
+  readonly onTogglePrompt: McpDiscoveryPopoverProps["onTogglePrompt"];
+  readonly onReadResource: McpDiscoveryPopoverProps["onReadResource"];
+}) {
+  /** Index every server by id, then collect each server's items into one
+   * flat list keyed by `(kind, name|uri)`. We bucket per-tag *within* a
+   * server below — the same tag from two servers stays in two distinct
+   * subsections so toggling one server doesn't fan out to the other. */
+  const perServer = useMemo(() => {
+    const byId = new Map<string, McpServerConfig>();
+    const items = new Map<string, UnifiedItem[]>();
+    const collect = (server: McpServerConfig, item: UnifiedItem) => {
+      byId.set(server.id, server);
+      let list = items.get(server.id);
+      if (!list) {
+        list = [];
+        items.set(server.id, list);
+      }
+      list.push(item);
+    };
+    for (const g of tools) {
+      for (const t of g.items) {
+        collect(g.server, {
+          server: g.server,
+          kind: "tool",
+          id: t.name,
+          label: t.name,
+          description: t.description,
+          tags: t.tags ?? [],
+        });
       }
     }
-  }
-  return Array.from(buckets.entries())
-    .map(([tag, entries]) => ({ tag, entries }))
-    .sort((a, b) => {
-      if (a.tag === UNTAGGED) return 1;
-      if (b.tag === UNTAGGED) return -1;
-      return a.tag.localeCompare(b.tag);
-    });
-}
+    for (const g of prompts) {
+      for (const p of g.items) {
+        collect(g.server, {
+          server: g.server,
+          kind: "prompt",
+          id: p.name,
+          label: p.name,
+          description: p.description,
+          tags: p.tags ?? [],
+        });
+      }
+    }
+    for (const g of resources) {
+      for (const r of g.items) {
+        collect(g.server, {
+          server: g.server,
+          kind: "resource",
+          id: r.uri,
+          label: r.name || r.uri,
+          description: r.mimeType,
+          tags: r.tags ?? [],
+          resource: r,
+        });
+      }
+    }
+    return Array.from(items.entries())
+      .map(([serverId, list]) => ({
+        server: byId.get(serverId)!,
+        items: list,
+      }))
+      .sort((a, b) => a.server.name.localeCompare(b.server.name));
+  }, [tools, prompts, resources]);
 
-function ToolsByTag({
-  groups,
-  onToggleTool,
-}: {
-  readonly groups: readonly ServerGroup<McpToolInfo>[];
-  readonly onToggleTool: (
-    serverId: string,
-    toolName: string,
-    nextEnabled: boolean,
-  ) => void;
-}) {
-  const buckets = useMemo(
-    () => bucketByTag(groups, (t) => t.tags),
-    [groups],
-  );
-  const errored = groups.filter((g) => g.listError);
   return (
     <div className="mcp-menu-groups">
-      {errored.map((g) => (
-        <p key={g.server.id} className="mcp-menu-section-error">
-          <strong>{g.server.name} · tools/list</strong>: {g.listError}
+      {errors.map((e) => (
+        <p
+          key={`${e.server.id}::${e.kind}`}
+          className="mcp-menu-section-error"
+        >
+          <strong>
+            {e.server.name} · {e.kind}/list
+          </strong>
+          : {e.error}
         </p>
       ))}
-      {buckets.map(({ tag, entries }) => (
-        <section key={tag} className="mcp-menu-section">
-          <div className="mcp-menu-section-head">
-            <span className="mcp-menu-section-name">{tag}</span>
-            <span className="mcp-menu-section-count">{entries.length}</span>
-          </div>
-          <ul className="mcp-menu-items">
-            {entries.map(({ server, item }) => (
-              <ToolItem
-                key={`${server.id}::${item.name}`}
-                server={server}
-                tool={item}
-                showServerName
-                onToggle={onToggleTool}
-              />
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function PromptsByTag({
-  groups,
-  onTogglePrompt,
-}: {
-  readonly groups: readonly ServerGroup<McpPromptInfo>[];
-  readonly onTogglePrompt: (
-    serverId: string,
-    promptName: string,
-    nextEnabled: boolean,
-  ) => void;
-}) {
-  const buckets = useMemo(
-    () => bucketByTag(groups, (p) => p.tags),
-    [groups],
-  );
-  const errored = groups.filter((g) => g.listError);
-  return (
-    <div className="mcp-menu-groups">
-      {errored.map((g) => (
-        <p key={g.server.id} className="mcp-menu-section-error">
-          <strong>{g.server.name} · prompts/list</strong>: {g.listError}
-        </p>
-      ))}
-      {buckets.map(({ tag, entries }) => (
-        <section key={tag} className="mcp-menu-section">
-          <div className="mcp-menu-section-head">
-            <span className="mcp-menu-section-name">{tag}</span>
-            <span className="mcp-menu-section-count">{entries.length}</span>
-          </div>
-          <ul className="mcp-menu-items">
-            {entries.map(({ server, item }) => (
-              <PromptItem
-                key={`${server.id}::${item.name}`}
-                server={server}
-                prompt={item}
-                showServerName
-                onToggle={onTogglePrompt}
-              />
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function PromptItem({
-  server,
-  prompt,
-  showServerName = false,
-  onToggle,
-}: {
-  readonly server: McpServerConfig;
-  readonly prompt: McpPromptInfo;
-  /** When the surrounding section isn't already scoped to one server (e.g.
-   * the tag-grouped view), prefix the prompt name with its server so
-   * duplicate prompt names across servers stay distinguishable. */
-  readonly showServerName?: boolean;
-  readonly onToggle: (
-    serverId: string,
-    promptName: string,
-    nextEnabled: boolean,
-  ) => void;
-}) {
-  const enabled = isPromptEnabled(server, prompt.name);
-  return (
-    <li className="mcp-menu-item mcp-menu-item-toggle">
-      <label className="mcp-menu-toggle-row">
-        <Switch
-          checked={enabled}
-          onChange={(next) => onToggle(server.id, prompt.name, next)}
-          ariaLabel={`Inject prompt ${prompt.name} as hidden context`}
+      {perServer.map(({ server, items }) => (
+        <ServerTagBlock
+          key={server.id}
+          server={server}
+          items={items}
+          itemState={itemState}
+          onToggleTool={onToggleTool}
+          onTogglePrompt={onTogglePrompt}
+          onReadResource={onReadResource}
         />
-        <span className="mcp-menu-toggle-label">
-          {showServerName ? (
-            <span className="mcp-menu-item-server">{server.name}·</span>
-          ) : null}
-          <code className="mcp-menu-item-name">{prompt.name}</code>
-          {prompt.description ? (
-            <>
-              <span className="mcp-menu-item-sep"> — </span>
-              <span className="mcp-menu-item-desc-inline">
-                {prompt.description}
-              </span>
-            </>
-          ) : null}
-          {prompt.arguments && prompt.arguments.length > 0 ? (
-            <span className="mcp-menu-item-args">
-              {" "}
-              ({prompt.arguments.map((a) => a.name).join(", ")})
-            </span>
-          ) : null}
-        </span>
-      </label>
-    </li>
+      ))}
+    </div>
   );
 }
 
-function ResourceItem({
+function ServerTagBlock({
   server,
-  resource,
-  state,
-  onRead,
+  items,
+  itemState,
+  onToggleTool,
+  onTogglePrompt,
+  onReadResource,
 }: {
   readonly server: McpServerConfig;
-  readonly resource: McpResourceInfo;
-  readonly state: "running" | { error: string } | undefined;
-  readonly onRead: (
-    server: McpServerConfig,
-    resource: McpResourceInfo,
-  ) => void;
+  readonly items: readonly UnifiedItem[];
+  readonly itemState: McpDiscoveryPopoverProps["itemState"];
+  readonly onToggleTool: McpDiscoveryPopoverProps["onToggleTool"];
+  readonly onTogglePrompt: McpDiscoveryPopoverProps["onTogglePrompt"];
+  readonly onReadResource: McpDiscoveryPopoverProps["onReadResource"];
 }) {
-  const running = state === "running";
-  const error =
-    state && typeof state === "object" && "error" in state
-      ? state.error
-      : undefined;
+  const buckets: readonly UnifiedTagBucket[] = useMemo(() => {
+    const map = new Map<string, UnifiedItem[]>();
+    for (const item of items) {
+      for (const tag of tagsOrUntagged(item.tags)) {
+        let list = map.get(tag);
+        if (!list) {
+          list = [];
+          map.set(tag, list);
+        }
+        list.push(item);
+      }
+    }
+    return Array.from(map.entries())
+      .map(([tag, list]) => ({ tag, items: list }))
+      .sort((a, b) => {
+        if (a.tag === UNTAGGED) return 1;
+        if (b.tag === UNTAGGED) return -1;
+        return a.tag.localeCompare(b.tag);
+      });
+  }, [items]);
+
   return (
-    <li className="mcp-menu-item mcp-menu-item-action">
-      <button
-        type="button"
-        className="mcp-menu-item-body"
-        onClick={() => onRead(server, resource)}
-        disabled={running}
-      >
-        <span className="mcp-menu-item-text">
-          <code className="mcp-menu-item-name">{resource.uri}</code>
-          {resource.name ? (
-            <span className="mcp-menu-item-desc">{resource.name}</span>
-          ) : null}
-          {resource.mimeType ? (
-            <span className="mcp-menu-item-meta">{resource.mimeType}</span>
-          ) : null}
-          {error ? <span className="mcp-menu-item-error">{error}</span> : null}
-        </span>
-        <span className="mcp-menu-item-action-trail">
-          {running ? <Spinner /> : <ChevronRightIcon />}
-        </span>
-      </button>
-    </li>
+    <section className="mcp-menu-section">
+      <div className="mcp-menu-section-head">
+        <span className="mcp-menu-section-name">{server.name}</span>
+        <span className="mcp-menu-section-count">{items.length}</span>
+      </div>
+      <div className="mcp-menu-subgroups">
+        {buckets.map(({ tag, items: bucket }) => (
+          <TagSubsection
+            key={tag}
+            server={server}
+            tag={tag}
+            items={bucket}
+            itemState={itemState}
+            onToggleTool={onToggleTool}
+            onTogglePrompt={onTogglePrompt}
+            onReadResource={onReadResource}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Returns the current "is this item considered active?" boolean. Resources
+ * have no enable state — they're click-to-read — so they're always reported
+ * active for counting purposes and excluded from the bulk toggle. */
+function isItemActive(item: UnifiedItem): boolean {
+  if (item.kind === "tool") return isToolEnabled(item.server, item.id);
+  if (item.kind === "prompt") return isPromptEnabled(item.server, item.id);
+  return true;
+}
+
+function TagSubsection({
+  server,
+  tag,
+  items,
+  itemState,
+  onToggleTool,
+  onTogglePrompt,
+  onReadResource,
+}: {
+  readonly server: McpServerConfig;
+  readonly tag: string;
+  readonly items: readonly UnifiedItem[];
+  readonly itemState: McpDiscoveryPopoverProps["itemState"];
+  readonly onToggleTool: McpDiscoveryPopoverProps["onToggleTool"];
+  readonly onTogglePrompt: McpDiscoveryPopoverProps["onTogglePrompt"];
+  readonly onReadResource: McpDiscoveryPopoverProps["onReadResource"];
+}) {
+  const togglable = items.filter((i) => i.kind !== "resource");
+  const enabledCount = togglable.filter(isItemActive).length;
+  const allEnabled = togglable.length > 0 && enabledCount === togglable.length;
+
+  const onToggleAll = (next: boolean) => {
+    for (const item of togglable) {
+      if (isItemActive(item) === next) continue;
+      if (item.kind === "tool") onToggleTool(item.server.id, item.id, next);
+      else if (item.kind === "prompt")
+        onTogglePrompt(item.server.id, item.id, next);
+    }
+  };
+
+  return (
+    <div className="mcp-menu-subsection">
+      <label className="mcp-menu-subsection-head">
+        {togglable.length > 0 ? (
+          <Switch
+            checked={allEnabled}
+            onChange={onToggleAll}
+            ariaLabel={`Enable all in ${tag}`}
+          />
+        ) : (
+          <span className="mcp-switch-pill" aria-hidden data-placeholder>
+            <span className="mcp-switch-thumb" />
+          </span>
+        )}
+        <span className="mcp-menu-subsection-name">{tag}</span>
+        {togglable.length > 0 ? (
+          <span className="mcp-menu-section-count">
+            {enabledCount}/{togglable.length}
+          </span>
+        ) : (
+          <span className="mcp-menu-section-count">{items.length}</span>
+        )}
+      </label>
+      <ul className="mcp-tool-chips">
+        {items.map((item) => {
+          const active = isItemActive(item);
+          const clickable = item.kind === "resource";
+          const runState = clickable
+            ? itemState[`${item.server.id}::resource::${item.id}`]
+            : undefined;
+          const running = runState === "running";
+          const error =
+            runState && typeof runState === "object" && "error" in runState
+              ? runState.error
+              : undefined;
+          const title =
+            error ?? item.description ?? (clickable ? item.id : undefined);
+          const chipProps = {
+            className: "mcp-tool-chip",
+            "data-kind": item.kind,
+            "data-off": active ? undefined : true,
+            "data-running": running || undefined,
+            "data-error": error ? true : undefined,
+            title,
+          } as const;
+          if (clickable && item.resource) {
+            return (
+              <li key={`${item.kind}:${item.id}`} className="mcp-tool-chip-li">
+                <button
+                  type="button"
+                  {...chipProps}
+                  onClick={() =>
+                    item.resource && onReadResource(item.server, item.resource)
+                  }
+                  disabled={running}
+                >
+                  {item.label}
+                </button>
+              </li>
+            );
+          }
+          return (
+            <li
+              key={`${item.kind}:${item.id}`}
+              className="mcp-tool-chip-li"
+            >
+              <span {...chipProps}>{item.label}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -1142,43 +1131,6 @@ function WrenchIcon() {
   );
 }
 
-function SparkleIcon() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
-    </svg>
-  );
-}
-
-function DatabaseIcon() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-    </svg>
-  );
-}
-
 function ChevronDownIcon() {
   return (
     <svg
@@ -1193,24 +1145,6 @@ function ChevronDownIcon() {
       aria-hidden
     >
       <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function ChevronRightIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="m9 6 6 6-6 6" />
     </svg>
   );
 }
@@ -1233,24 +1167,6 @@ function CloseIcon() {
   );
 }
 
-function Spinner() {
-  return (
-    <svg
-      className="mcp-menu-spinner"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      aria-hidden
-    >
-      <path d="M21 12a9 9 0 1 1-6.2-8.55" />
-    </svg>
-  );
-}
-
 function SendIcon() {
   return (
     <svg
@@ -1267,6 +1183,265 @@ function SendIcon() {
       <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" />
     </svg>
   );
+}
+
+function StopIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+    >
+      <rect x="6" y="6" width="12" height="12" rx="1.5" />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 12a9 9 0 1 1-3.6-7.2" />
+      <path d="M21 4v5h-5" />
+    </svg>
+  );
+}
+
+// -- Model picker ----------------------------------------------------------
+
+const EMPTY_TRANSCRIPT: readonly TranscriptMessage[] = [];
+
+interface ModelChipProps {
+  readonly activeModel: string | undefined;
+  readonly models: readonly string[];
+  readonly isLoading: boolean;
+  readonly error: string | null;
+  readonly fromEndpoint: boolean;
+  readonly open: boolean;
+  readonly onToggle: () => void;
+  readonly onClose: () => void;
+  readonly onPick: (model: string) => void;
+  readonly onRefresh: () => void;
+}
+
+/** Inline model picker chip. The label shows the active model id (truncated)
+ * and a chevron; clicking opens a popover with discovered models. When the
+ * `/models` endpoint isn't reachable we fall back to the provider's default
+ * model and surface the failure as a quiet hint inside the popover. */
+function ModelChip({
+  activeModel,
+  models,
+  isLoading,
+  error,
+  fromEndpoint,
+  open,
+  onToggle,
+  onClose,
+  onPick,
+  onRefresh,
+}: ModelChipProps) {
+  return (
+    <span className="model-chip-wrap">
+      <button
+        type="button"
+        className="tool-chip model-chip"
+        data-active={open || undefined}
+        title={activeModel ? `Model: ${activeModel}` : "Pick a model"}
+        onClick={onToggle}
+      >
+        <span className="tool-chip-icon" aria-hidden>
+          <CpuIcon />
+        </span>
+        <span className="model-chip-label">
+          {activeModel ?? "Pick a model"}
+        </span>
+        <ChevronDownIcon />
+      </button>
+      {open ? (
+        <div className="model-menu" role="dialog" aria-label="Pick a model">
+          <header className="mcp-menu-head">
+            <div>
+              <div className="mcp-menu-title">
+                Models
+                {models.length > 0 ? (
+                  <span className="mcp-menu-count">{models.length}</span>
+                ) : null}
+              </div>
+              <div className="mcp-menu-hint">
+                {isLoading
+                  ? "Fetching from /models…"
+                  : fromEndpoint
+                    ? "From provider /models endpoint"
+                    : error
+                      ? `/models unavailable — using provider default${
+                          error ? ` (${error})` : ""
+                        }`
+                      : "No /models endpoint — using provider default"}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="mcp-menu-close"
+              onClick={() => {
+                onRefresh();
+              }}
+              aria-label="Refresh models"
+              title="Refresh"
+            >
+              <RefreshIcon />
+            </button>
+            <button
+              type="button"
+              className="mcp-menu-close"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <CloseIcon />
+            </button>
+          </header>
+          {models.length === 0 ? (
+            <p className="mcp-menu-empty">
+              No models available. Set a default model on the provider in
+              Settings → Providers.
+            </p>
+          ) : (
+            <ul className="mcp-menu-items model-menu-items">
+              {models.map((m) => (
+                <li
+                  key={m}
+                  role="option"
+                  aria-selected={m === activeModel}
+                  className="mcp-menu-item mcp-menu-item-action"
+                  data-active={m === activeModel || undefined}
+                >
+                  <button
+                    type="button"
+                    className="mcp-menu-item-body"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      onPick(m);
+                    }}
+                  >
+                    <span className="mcp-menu-item-text">
+                      <code className="mcp-menu-item-name">{m}</code>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+function CpuIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <rect x="9" y="9" width="6" height="6" />
+      <path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3" />
+    </svg>
+  );
+}
+
+// -- Context window indicator ----------------------------------------------
+
+interface ContextUsageChipProps {
+  readonly messages: readonly TranscriptMessage[];
+  readonly pendingContext: readonly PendingContextEntry[];
+  readonly modelId: string | undefined;
+  readonly contextResetAt: string | undefined;
+  readonly onReset?: () => void;
+}
+
+/** Estimate-and-show chip: how full the model's context window is right now,
+ * based on the visible transcript plus any prompt/resource context the user
+ * has cued up. Estimation is approximate (chars/4 + small per-message
+ * overhead) — exact tokenization would mean shipping a tokenizer per provider.
+ * Hidden until there's something to show; turns amber over 70%, red over 90%.
+ *
+ * Clicking the chip resets the model-side context — older messages stay
+ * visible in the transcript but stop being sent to the model, dropping the
+ * percentage back to 0 and freeing the window for fresh turns. */
+function ContextUsageChip({
+  messages,
+  pendingContext,
+  modelId,
+  contextResetAt,
+  onReset,
+}: ContextUsageChipProps) {
+  const { used, window } = useMemo(() => {
+    const window = contextWindowFor(modelId);
+    const sendable = contextResetAt
+      ? messages.filter((m) => m.createdAt >= contextResetAt)
+      : messages;
+    let used = estimateMessageTokens(sendable);
+    for (const ctx of pendingContext) used += estimateTokens(ctx.content);
+    return { used, window };
+  }, [messages, pendingContext, modelId, contextResetAt]);
+
+  if (used <= 0) return null;
+  const pct = Math.min(100, Math.round((used / window) * 100));
+  const tone = pct >= 90 ? "danger" : pct >= 70 ? "warn" : "ok";
+  const title = onReset
+    ? `${formatTokens(used)} / ${formatTokens(window)} tokens (estimate) — click to reset context`
+    : `${formatTokens(used)} / ${formatTokens(window)} tokens (estimate)`;
+
+  if (!onReset) {
+    return (
+      <span className="context-chip" data-tone={tone} title={title}>
+        <span className="context-chip-bar" aria-hidden>
+          <span className="context-chip-fill" style={{ width: `${pct}%` }} />
+        </span>
+        <span className="context-chip-pct">{pct}%</span>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="context-chip context-chip-reset"
+      data-tone={tone}
+      title={title}
+      aria-label={`Reset context (${pct}% used)`}
+      onClick={onReset}
+    >
+      <span className="context-chip-bar" aria-hidden>
+        <span className="context-chip-fill" style={{ width: `${pct}%` }} />
+      </span>
+      <span className="context-chip-pct">{pct}%</span>
+    </button>
+  );
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return String(n);
 }
 
 // -- Skills (slash invocation) ---------------------------------------------

@@ -3,6 +3,7 @@ import { KeyValueList } from "./key-value-list";
 import { Button } from "../../components/ui";
 import { buildExtraBody, createClient } from "../../lib/llm/client";
 import { LLMError } from "../../lib/llm/errors";
+import { isReasoningModel } from "../../lib/llm/model-traits";
 import {
   AUTH_MODE_LABELS,
   type AuthMode,
@@ -183,10 +184,17 @@ export function ProviderForm({
     setTestState({ kind: "testing" });
     try {
       const client = createClient(cleaned);
+      // Reasoning models (gpt-5*, o1*, o3*, o4*) reject `max_tokens` and burn
+      // through hundreds of reasoning tokens before any visible output, so a
+      // `max_tokens: 1` ping always 400s with "max_tokens reached". Use the
+      // right field and a budget big enough to actually finish.
+      const reasoning = isReasoningModel(cleaned.model);
+      const tokenField = reasoning ? "max_completion_tokens" : "max_tokens";
+      const tokenLimit = reasoning ? 4096 : 16;
       const r = await client.chat({
         model: cleaned.model,
         messages: [{ role: "user", content: "ping" }],
-        max_tokens: 1,
+        [tokenField]: tokenLimit,
         ...buildExtraBody(cleaned),
       });
       setTestState({ kind: "ok", modelEcho: r.model });

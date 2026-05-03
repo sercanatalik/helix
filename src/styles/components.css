@@ -2540,6 +2540,80 @@ button.mcp-tool-chip:disabled {
   white-space: nowrap;
 }
 
+/* ---------- Inline rename / new file/folder editor in the tree -------- */
+.tree-row-edit {
+  cursor: text;
+  background: var(--bg-elev);
+}
+.tree-row-edit:hover {
+  /* Already styled when active — kill the regular hover wash so the
+     embedded input still reads as the focal element. */
+  background: var(--bg-elev);
+}
+.tree-row-edit-input {
+  width: 100%;
+  min-width: 0;
+  padding: 1px 4px;
+  font: inherit;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--accent-raw);
+  border-radius: 3px;
+  outline: none;
+}
+.tree-row-edit-input:focus {
+  border-color: var(--accent-raw);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent-raw) 22%, transparent);
+}
+
+/* ---------- Workspace panel context menu ------------------------------ */
+.ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--bg-elev-2, var(--bg-elev));
+  border: 1px solid var(--border, color-mix(in oklab, currentColor 10%, transparent));
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ctx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  border-radius: 5px;
+  cursor: pointer;
+  font: inherit;
+}
+.ctx-menu-item:hover,
+.ctx-menu-item:focus-visible {
+  background: var(--bg-elev);
+  outline: none;
+}
+.ctx-menu-item[data-tone="danger"] {
+  color: var(--danger, #d96b6b);
+}
+.ctx-menu-item[data-tone="danger"]:hover,
+.ctx-menu-item[data-tone="danger"]:focus-visible {
+  background: color-mix(in oklab, var(--danger, #d96b6b) 14%, transparent);
+}
+.ctx-menu-sep {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--border, color-mix(in oklab, currentColor 10%, transparent));
+}
+
 /* ---------- Skills pane (Settings → Skills) -------------------------- */
 .settings-section-head {
   display: flex;

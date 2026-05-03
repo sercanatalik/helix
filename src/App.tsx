@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import { AddWorkspaceDialog } from "./app/add-workspace-dialog";
 import { MainDock } from "./app/main-dock";
 import { WorkspacePanel } from "./app/workspace-panel";
@@ -16,6 +23,8 @@ import {
   type WorkspaceRecord,
 } from "./app/types";
 import { Composer, Transcript } from "./features/chat";
+import type { ComposerHandle } from "./features/chat";
+import type { TreeEntry } from "./lib/tauri-api";
 import { NoteEditorContainer } from "./features/notes";
 import { Settings } from "./features/settings";
 import { useProviders } from "./features/providers";
@@ -36,6 +45,12 @@ export function App() {
   const notesApi = useNotes(workspacesApi.activeWorkspace);
   const [isAddingWorkspace, setIsAddingWorkspace] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
+  // Imperative handle into the active Composer. Lets the workspace panel
+  // push a file (read via the same `read_file` Tauri command the model
+  // uses) straight into the composer's pending-context list — no global
+  // store, no event bus. Null when the chat view isn't mounted (e.g. a
+  // note editor has the main pane).
+  const composerRef = useRef<ComposerHandle | null>(null);
   // Per-workspace ordered list of open note tabs in the main dock. The
   // active note id (owned by `useNotes`) decides which of these is focused.
   const [openIdsByWorkspace, setOpenIdsByWorkspace] = useState<
@@ -242,6 +257,38 @@ export function App() {
     [workspacesApi.activeWorkspace, handleCloseNote],
   );
 
+  // Workspace panel → composer. Click a file row in the right sidebar and
+  // its content rides along on the next message as hidden system context,
+  // attributed to the `read_file` built-in tool. Binary kinds are skipped
+  // for now — images / PDFs need a different routing (multimodal content
+  // blocks vs. plain text), so silently no-op rather than dump a base64
+  // blob into the prompt.
+  const handleAttachFileToContext = useCallback(
+    async (entry: TreeEntry) => {
+      if (entry.kind !== "file") return;
+      const composer = composerRef.current;
+      if (!composer) return;
+      const ws = workspacesApi.activeWorkspace;
+      try {
+        const result = await window.helixApi.readFile(entry.path);
+        if (result.kind !== "text" && result.kind !== "notebook") return;
+        const relPath =
+          ws?.path && entry.path.startsWith(ws.path)
+            ? entry.path.slice(ws.path.length).replace(/^[\\/]+/, "")
+            : entry.name;
+        composer.attachWorkspaceFile({
+          absPath: entry.path,
+          relPath,
+          content: result.content,
+        });
+      } catch {
+        // Read failure is non-fatal — the panel already shows the file as
+        // present, and the user will retry or pick a different one.
+      }
+    },
+    [workspacesApi.activeWorkspace],
+  );
+
   // Auto-open the active note as a tab when it's set from outside the dock
   // (sidebar selection, restore from storage). Cheap — runs only when the
   // active id flips.
@@ -326,6 +373,7 @@ export function App() {
                 setMessages={sessionsApi.setMessages}
                 setContextResetAt={sessionsApi.setContextResetAt}
                 createSession={sessionsApi.createSession}
+                composerRef={composerRef}
               />
             )}
           </>
@@ -352,6 +400,7 @@ export function App() {
               note.title,
             );
           }}
+          onSelectFile={(entry) => void handleAttachFileToContext(entry)}
         />
       ) : null}
       {isAddingWorkspace ? (
@@ -376,6 +425,10 @@ interface ChatViewProps {
     timestamp: string | undefined,
   ) => void;
   readonly createSession: () => string;
+  /** Ref attached to the rendered Composer so the parent (App) can push
+   * workspace files into pending context when the user clicks them in the
+   * right sidebar. */
+  readonly composerRef?: Ref<ComposerHandle>;
 }
 
 function ChatView({
@@ -384,6 +437,7 @@ function ChatView({
   setMessages,
   setContextResetAt,
   createSession,
+  composerRef,
 }: ChatViewProps) {
   const { activeProvider } = useProviders();
   const messages = activeSession?.transcript ?? EMPTY_MESSAGES;
@@ -460,6 +514,7 @@ function ChatView({
         <EmptyChat workspaceName={activeWorkspace?.displayName} />
       )}
       <Composer
+        ref={composerRef}
         onSend={(text, extras) => void send(text, extras)}
         onStop={stop}
         disabled={!activeProvider || !hasModel}

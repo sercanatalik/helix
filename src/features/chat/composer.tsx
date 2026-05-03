@@ -1,6 +1,8 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -75,15 +77,32 @@ interface ComposerProps {
   readonly workspacePath?: string;
 }
 
-/** A prompt or resource the user has loaded into context for the next
- * message. Stored entirely on the frontend — sent to the model as a system
- * message via `ChatExtras.systemContext`, never written to the transcript. */
+/** A prompt, resource, or workspace file the user has loaded into context
+ * for the next message. Stored entirely on the frontend — sent to the model
+ * as a system message via `ChatExtras.systemContext`, never written to the
+ * transcript. The `file` kind is produced by clicking a file in the
+ * workspace panel; its content rides through `read_file` so the header in
+ * `contextHeader` names that tool. */
 interface PendingContextEntry {
   readonly id: string;
-  readonly kind: "prompt" | "resource";
+  readonly kind: "prompt" | "resource" | "file";
   readonly serverName: string;
   readonly label: string;
   readonly content: string;
+}
+
+/** Imperative surface the parent (App) reaches into when the user clicks a
+ * file in the workspace panel. Kept narrow — anything broader belongs as
+ * a regular prop. */
+export interface ComposerHandle {
+  /** Push a workspace file into pending context. `relPath` is what the user
+   * sees on the chip; `absPath` is what the model is told the file lives at
+   * (matches the `read_file` tool's resolved-path output). */
+  attachWorkspaceFile: (args: {
+    readonly absPath: string;
+    readonly relPath: string;
+    readonly content: string;
+  }) => void;
 }
 
 type ChipKind = "tools" | "prompts" | "resources";
@@ -94,21 +113,24 @@ interface ServerGroup<T> {
   readonly listError: string | undefined;
 }
 
-export function Composer({
-  onSend,
-  onStop,
-  disabled = false,
-  isStreaming = false,
-  hint,
-  provider,
-  selectedModel,
-  onSelectModel,
-  messages,
-  contextResetAt,
-  onResetContext,
-  onClearTranscript,
-  workspacePath,
-}: ComposerProps) {
+export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
+  {
+    onSend,
+    onStop,
+    disabled = false,
+    isStreaming = false,
+    hint,
+    provider,
+    selectedModel,
+    onSelectModel,
+    messages,
+    contextResetAt,
+    onResetContext,
+    onClearTranscript,
+    workspacePath,
+  },
+  ref,
+) {
   const [text, setText] = useState("");
   const [open, setOpen] = useState<boolean>(false);
   const [builtinOpen, setBuiltinOpen] = useState<boolean>(false);
@@ -308,6 +330,27 @@ export function Composer({
   const removePendingContext = useCallback((id: string) => {
     setPendingContext((prev) => prev.filter((p) => p.id !== id));
   }, []);
+
+  // Imperative handle for the workspace panel: clicking a file there pushes
+  // it into pending context as if the model had called `read_file`. The
+  // header points at that tool name so the model can correlate the inline
+  // content with later tool-call results if it chooses to re-read.
+  useImperativeHandle(
+    ref,
+    () => ({
+      attachWorkspaceFile: ({ absPath, relPath, content }) => {
+        addPendingContext({
+          id: `file:${absPath}`,
+          kind: "file",
+          serverName: "Workspace",
+          label: relPath,
+          content:
+            contextHeader("file", "read_file", absPath) + content,
+        });
+      },
+    }),
+    [addPendingContext],
+  );
 
   /** Fetch every prompt the user has marked enabled (across all connected
    * servers) and concatenate the results into a list of system messages.
@@ -614,10 +657,18 @@ export function Composer({
                 role="listitem"
                 className="composer-context-chip"
                 data-kind={entry.kind}
-                title={`${entry.kind === "prompt" ? "Prompt" : "Resource"} from ${entry.serverName} — sent as hidden system context on the next message.`}
+                title={
+                  entry.kind === "file"
+                    ? `Workspace file loaded via read_file — sent as hidden system context on the next message.`
+                    : `${entry.kind === "prompt" ? "Prompt" : "Resource"} from ${entry.serverName} — sent as hidden system context on the next message.`
+                }
               >
                 <span className="composer-context-kind">
-                  {entry.kind === "prompt" ? "prompt" : "resource"}
+                  {entry.kind === "prompt"
+                    ? "prompt"
+                    : entry.kind === "resource"
+                      ? "resource"
+                      : "file"}
                 </span>
                 <span className="composer-context-label">{entry.label}</span>
                 <button
@@ -715,7 +766,7 @@ export function Composer({
       </div>
     </div>
   );
-}
+});
 
 /** Write the most recent assistant message to the workspace as a markdown
  * file. Surfaces success / failure / no-op states through the supplied
@@ -788,12 +839,19 @@ function buildWorkspaceContext(path: string | undefined): string[] {
 
 /** Wrap the content sent to the model with a tiny attribution header, so a
  * model that's seeing many MCP-derived system messages can tell where each
- * came from. Visible only inside the API call, never the transcript. */
+ * came from. Visible only inside the API call, never the transcript.
+ *
+ * The `file` variant is used when the user clicks a file in the workspace
+ * panel — `serverName` is set to `"read_file"` so the model can correlate
+ * the inline content with that built-in tool. */
 function contextHeader(
-  kind: "prompt" | "resource",
+  kind: "prompt" | "resource" | "file",
   serverName: string,
   label: string,
 ): string {
+  if (kind === "file") {
+    return `[helix workspace file · loaded via read_file · ${label}]\n`;
+  }
   return `[helix mcp ${kind} · ${serverName} · ${label}]\n`;
 }
 

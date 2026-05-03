@@ -828,3 +828,268 @@ pub async fn test_mcp_server(input: McpServerInput) -> McpTestResult {
     };
     crate::mcp::test_connection(&probe).await
 }
+
+// -- Workspace file ops driven by the right-click context menu -----------
+//
+// These three sit alongside the note-specific ops (`create_note`,
+// `delete_note`) but operate on arbitrary files inside the workspace, not
+// just markdown discovered by the notes scanner. All enforce a workspace
+// boundary so a malicious-looking path can't reach above the attached
+// folder.
+
+/// Reveal a file in the OS file manager. On macOS that means highlighting
+/// it in Finder; on Windows, selecting it in Explorer; on Linux we fall
+/// back to opening the parent directory (no widely-supported "select"
+/// flag across desktop environments).
+///
+/// Best-effort: a non-zero exit from the helper still returns Ok because
+/// some file managers don't follow conventional exit codes, and the user
+/// will see the failure in their own UI immediately.
+#[tauri::command]
+pub fn reveal_in_folder(path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if !target.exists() {
+        return Err(format!("path does not exist: {path}"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // `explorer /select,<path>` highlights the file in a new window.
+        // `explorer` is forgiving about quoting; pass via raw arg.
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", target.display()))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // No reliable cross-DE "select this file" flag — open the parent
+        // folder instead. xdg-open is part of xdg-utils; almost always
+        // present on a desktop install.
+        let parent = target.parent().unwrap_or(&target);
+        std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Delete a file under the active workspace. Refuses paths outside the
+/// workspace folder so a stray click can't escape into `/etc` or the
+/// user's home dir. No trash bin — the file is unlinked outright.
+#[tauri::command]
+pub fn delete_workspace_file(workspace_path: String, path: String) -> Result<(), String> {
+    let root = PathBuf::from(&workspace_path);
+    let target = PathBuf::from(&path);
+    let canonical_root = root.canonicalize().unwrap_or(root.clone());
+    let canonical_target = target.canonicalize().unwrap_or(target.clone());
+    if !canonical_target.starts_with(&canonical_root) {
+        return Err("refusing to delete a path outside the workspace".to_string());
+    }
+    if !canonical_target.exists() {
+        return Ok(()); // already gone — treat as success
+    }
+    if canonical_target.is_dir() {
+        return Err("refusing to delete a directory; right-click a file".to_string());
+    }
+    std::fs::remove_file(&canonical_target).map_err(|e| e.to_string())
+}
+
+/// Delete any path under the active workspace — file or folder. Folders
+/// are removed recursively. Refuses to delete the workspace root itself
+/// so an accidental "delete" on the top-level folder can't nuke the
+/// project. Use this for the right-click "Delete folder" action; the
+/// note-scoped `delete_note` and the file-scoped `delete_workspace_file`
+/// stay in place for narrower call sites.
+#[tauri::command]
+pub fn delete_workspace_path(workspace_path: String, path: String) -> Result<(), String> {
+    let root = PathBuf::from(&workspace_path);
+    let target = PathBuf::from(&path);
+    let canonical_root = root.canonicalize().unwrap_or(root.clone());
+    let canonical_target = target.canonicalize().unwrap_or(target.clone());
+    if !canonical_target.starts_with(&canonical_root) {
+        return Err("refusing to delete a path outside the workspace".to_string());
+    }
+    if canonical_target == canonical_root {
+        return Err("refusing to delete the workspace root".to_string());
+    }
+    if !canonical_target.exists() {
+        return Ok(());
+    }
+    if canonical_target.is_dir() {
+        std::fs::remove_dir_all(&canonical_target).map_err(|e| e.to_string())
+    } else {
+        std::fs::remove_file(&canonical_target).map_err(|e| e.to_string())
+    }
+}
+
+/// Rename (or move-within-parent) a file or folder under the workspace.
+/// VSCode-style: the user types a new name in an inline editor; we write
+/// it to disk via `fs::rename`. Refuses to escape the workspace, refuses
+/// names containing path separators or `..` segments, and refuses to
+/// overwrite an existing entry. Returns the new absolute path so the
+/// caller can update any cached references (open editors, selection
+/// state) without waiting for the watcher rescan.
+#[tauri::command]
+pub fn rename_workspace_path(
+    workspace_path: String,
+    old_path: String,
+    new_name: String,
+) -> Result<String, String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("name cannot be empty".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("name cannot contain path separators".to_string());
+    }
+    if trimmed == "." || trimmed == ".." {
+        return Err("invalid name".to_string());
+    }
+    let root = PathBuf::from(&workspace_path);
+    let old = PathBuf::from(&old_path);
+    let canonical_root = root.canonicalize().unwrap_or(root.clone());
+    let canonical_old = old.canonicalize().unwrap_or(old.clone());
+    if !canonical_old.starts_with(&canonical_root) {
+        return Err("refusing to rename a path outside the workspace".to_string());
+    }
+    if canonical_old == canonical_root {
+        return Err("refusing to rename the workspace root".to_string());
+    }
+    if !canonical_old.exists() {
+        return Err(format!("path does not exist: {old_path}"));
+    }
+    let parent = canonical_old
+        .parent()
+        .ok_or_else(|| "no parent directory".to_string())?;
+    let new_path = parent.join(trimmed);
+    if new_path == canonical_old {
+        return Ok(canonical_old.to_string_lossy().into_owned());
+    }
+    if new_path.exists() {
+        return Err(format!("an entry named \"{trimmed}\" already exists here"));
+    }
+    std::fs::rename(&canonical_old, &new_path).map_err(|e| e.to_string())?;
+    Ok(new_path.to_string_lossy().into_owned())
+}
+
+/// Kind discriminator for `create_workspace_entry`. Serialized
+/// lower-case to keep the JS-side payload conventional.
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum CreateEntryKind {
+    File,
+    Folder,
+}
+
+/// Create a new file or folder under the workspace with a user-supplied
+/// name. Used by the right-click "New file…" / "New folder…" actions
+/// where the user types the name inline. Refuses path separators / `..`
+/// in the name, refuses to escape the workspace, refuses overwrites.
+/// Returns the new absolute path.
+///
+/// Files are created empty unless the extension is `.md`, in which case a
+/// minimal `# <stem>\n\n` body is written so the editor opens with the
+/// title heading already in place — same affordance as `create_note`.
+/// Folders are plain `mkdir` (non-recursive — the parent must exist).
+#[tauri::command]
+pub fn create_workspace_entry(
+    workspace_path: String,
+    parent_dir: String,
+    name: String,
+    kind: CreateEntryKind,
+) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("name cannot be empty".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("name cannot contain path separators".to_string());
+    }
+    if trimmed == "." || trimmed == ".." {
+        return Err("invalid name".to_string());
+    }
+    let root = PathBuf::from(&workspace_path);
+    let parent = PathBuf::from(&parent_dir);
+    let canonical_root = root.canonicalize().unwrap_or(root.clone());
+    let canonical_parent = parent.canonicalize().unwrap_or(parent.clone());
+    if !canonical_parent.starts_with(&canonical_root) {
+        return Err("refusing to create an entry outside the workspace".to_string());
+    }
+    if !canonical_parent.is_dir() {
+        return Err(format!("parent is not a directory: {parent_dir}"));
+    }
+    let target = canonical_parent.join(trimmed);
+    if target.exists() {
+        return Err(format!("an entry named \"{trimmed}\" already exists here"));
+    }
+    match kind {
+        CreateEntryKind::Folder => {
+            std::fs::create_dir(&target).map_err(|e| e.to_string())?;
+        }
+        CreateEntryKind::File => {
+            let initial = if target
+                .extension()
+                .map(|e| e.eq_ignore_ascii_case("md"))
+                .unwrap_or(false)
+            {
+                let stem = target
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "untitled".to_string());
+                format!("# {stem}\n\n")
+            } else {
+                String::new()
+            };
+            std::fs::write(&target, initial).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Create a fresh `untitled-N.md` under `parent_dir` and return the new
+/// note record. `parent_dir` must lie inside the workspace folder; passing
+/// the workspace root itself is fine. Returns the same `NoteRecord` shape
+/// `create_note` does so the renderer can hand it straight to the notes
+/// list / dock.
+#[tauri::command]
+pub fn create_markdown_file(
+    workspace_id: String,
+    workspace_path: String,
+    parent_dir: String,
+    state: State<'_, SharedState>,
+) -> Result<NoteRecord, String> {
+    let root = PathBuf::from(&workspace_path);
+    if !root.is_dir() {
+        return Err(format!("workspace is not a directory: {workspace_path}"));
+    }
+    let parent = PathBuf::from(&parent_dir);
+    let canonical_root = root.canonicalize().unwrap_or(root.clone());
+    let canonical_parent = parent.canonicalize().unwrap_or(parent.clone());
+    if !canonical_parent.starts_with(&canonical_root) {
+        return Err("refusing to create a file outside the workspace".to_string());
+    }
+    if !canonical_parent.is_dir() {
+        return Err(format!("parent is not a directory: {parent_dir}"));
+    }
+    let path = notes::next_untitled_path(&canonical_parent)
+        .ok_or_else(|| "ran out of untitled-N slots in this folder".to_string())?;
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "untitled".to_string());
+    let initial = format!("# {stem}\n\n");
+    let note = notes::write_note_content(&workspace_id, &canonical_root, &path, &initial)
+        .map_err(|e| e.to_string())?;
+    let scanned = notes::scan_workspace(&workspace_id, &canonical_root);
+    store_notes(&state, scanned);
+    Ok(note)
+}

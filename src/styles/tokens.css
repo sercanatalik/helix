@@ -24,4 +24,12 @@
     "Helvetica Neue", sans-serif;
   --font-mono:
     "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Kind dot colors used by the MCP palette (tool / prompt / resource).
+   * Theme-agnostic so a chip stays recognizable across themes. `tool` rides
+   * the active accent so it tracks the user's theme choice; `prompt` and
+   * `resource` are fixed oklch hues picked to read against any background. */
+  --kind-tool: var(--accent-raw);
+  --kind-prompt: oklch(0.55 0.15 295);
+  --kind-resource: oklch(0.65 0.13 65);
 }

@@ -9,18 +9,21 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Button, Kbd } from "../../components/ui";
+import { BuiltinPalette } from "./builtin-palette";
+import { McpPalette } from "./mcp-palette";
 import { useMcpServers } from "../../hooks/use-mcp-servers";
+import {
+  UNTAGGED_TAG,
+  useMcpEnabledTags,
+} from "../../hooks/use-mcp-enabled-tags";
 import { useModels } from "../../hooks/use-models";
 import { useSkills } from "../../hooks/use-skills";
 import type { ChatExtras, McpToolBinding } from "../../hooks/use-chat";
 import type { ProviderConfig } from "../../features/providers";
 import {
-  BUILTIN_GROUP_LABEL,
   BUILTIN_SERVER_ID,
   BUILTIN_SLASH_COMMANDS,
   type BuiltinSlashCommand,
-  type BuiltinToolDef,
-  type BuiltinToolGroup,
   setBuiltinUiHandlers,
   useBuiltinTools,
 } from "../../lib/builtin-tools";
@@ -166,8 +169,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const canSend =
     text.trim().length > 0 && !disabled && !isStreaming && !!activeModel;
 
-  const { servers, runtime, setToolEnabled, setPromptEnabled } =
-    useMcpServers();
+  const { servers, runtime } = useMcpServers();
+  const { isTagEnabled } = useMcpEnabledTags();
   const { skills, render: renderSkill } = useSkills();
   const builtinTools = useBuiltinTools();
 
@@ -273,11 +276,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const counts: Record<ChipKind, number> = useMemo(
     () => ({
       tools: groups.tools.reduce(
-        (acc, g) => acc + activeToolCount(g),
+        (acc, g) =>
+          acc +
+          g.items.filter((t) => itemEnabledByTags(t.tags, isTagEnabled))
+            .length,
         0,
       ),
       prompts: groups.prompts.reduce(
-        (acc, g) => acc + activePromptCount(g),
+        (acc, g) =>
+          acc +
+          g.items.filter((p) => itemEnabledByTags(p.tags, isTagEnabled))
+            .length,
         0,
       ),
       resources: groups.resources.reduce(
@@ -285,7 +294,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         0,
       ),
     }),
-    [groups],
+    [groups, isTagEnabled],
   );
 
   /** Total advertised across all connected servers, ignoring user toggles.
@@ -352,17 +361,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     [addPendingContext],
   );
 
-  /** Fetch every prompt the user has marked enabled (across all connected
-   * servers) and concatenate the results into a list of system messages.
-   * Called from `submit` so each send sees fresh content — if a prompt
-   * changes server-side, the next message picks it up automatically. */
+  /** Fetch every prompt the user has effectively enabled (any of its tags
+   * is on across all connected servers) and concatenate the results into
+   * a list of system messages. Called from `submit` so each send sees
+   * fresh content — if a prompt changes server-side, the next message
+   * picks it up automatically. */
   const fetchEnabledPromptContext = async (): Promise<string[]> => {
     const targets: { server: McpServerConfig; prompt: McpPromptInfo }[] = [];
     for (const group of groups.prompts) {
-      const enabled = new Set(group.server.enabledPrompts ?? []);
-      if (enabled.size === 0) continue;
       for (const prompt of group.items) {
-        if (enabled.has(prompt.name)) {
+        if (itemEnabledByTags(prompt.tags, isTagEnabled)) {
           targets.push({ server: group.server, prompt });
         }
       }
@@ -438,12 +446,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     }
   };
 
-  /** Build the McpToolBinding list passed to the chat hook. We include every
-   * advertised tool from a *connected* server that hasn't been disabled by
-   * the user — so the toggle in the menu controls model visibility directly.
-   * Built-in tools (Read / Write / Edit / Glob / Grep) ride the same list
-   * with a sentinel server id; `useChat`'s dispatcher routes them to the
-   * Tauri backend instead of an MCP transport. */
+  /** Build the McpToolBinding list passed to the chat hook. A tool is
+   * exposed to the model when any of its advertised tags is currently
+   * enabled (or when it's untagged and the user hasn't explicitly
+   * disabled the "untagged" bucket). Built-in tools (Read / Write / Edit
+   * / Glob / Grep) ride the same list with a sentinel server id;
+   * `useChat`'s dispatcher routes them to the Tauri backend instead of
+   * an MCP transport. */
   const mcpToolBindings = useMemo<readonly McpToolBinding[]>(() => {
     const out: McpToolBinding[] = [];
     for (const tool of builtinTools.tools) {
@@ -456,9 +465,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       });
     }
     for (const group of groups.tools) {
-      const disabled = new Set(group.server.disabledTools ?? []);
       for (const tool of group.items) {
-        if (disabled.has(tool.name)) continue;
+        if (!itemEnabledByTags(tool.tags, isTagEnabled)) continue;
         out.push({
           serverId: group.server.id,
           toolName: tool.name,
@@ -468,7 +476,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
     }
     return out;
-  }, [groups.tools, builtinTools]);
+  }, [groups.tools, builtinTools, isTagEnabled]);
 
   async function submit() {
     // `/clear` short-circuits the whole pipeline: drop the input, wipe
@@ -685,19 +693,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         ) : null}
 
         {open && anyConnected ? (
-          <McpDiscoveryPopover
+          <McpPalette
             popoverRef={mcpPopoverRef}
             tools={groups.tools}
             prompts={groups.prompts}
             resources={groups.resources}
             itemState={itemState}
             onClose={() => setOpen(false)}
-            onToggleTool={(serverId, toolName, nextEnabled) =>
-              void setToolEnabled(serverId, toolName, nextEnabled)
-            }
-            onTogglePrompt={(serverId, promptName, nextEnabled) =>
-              void setPromptEnabled(serverId, promptName, nextEnabled)
-            }
             onReadResource={(server, resource) =>
               void onReadResource(server, resource)
             }
@@ -705,11 +707,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         ) : null}
 
         {builtinOpen ? (
-          <BuiltinDiscoveryPopover
+          <BuiltinPalette
             popoverRef={builtinPopoverRef}
             tools={builtinTools.tools}
             isEnabled={builtinTools.isEnabled}
-            enabledCount={builtinTools.enabledNames.length}
             onToggle={builtinTools.setEnabled}
             onClose={() => setBuiltinOpen(false)}
           />
@@ -855,34 +856,17 @@ function contextHeader(
   return `[helix mcp ${kind} · ${serverName} · ${label}]\n`;
 }
 
-function activeToolCount(group: ServerGroup<McpToolInfo>): number {
-  const disabled = new Set(group.server.disabledTools ?? []);
-  let n = 0;
-  for (const t of group.items) {
-    if (!disabled.has(t.name)) n++;
-  }
-  return n;
-}
-
-function activePromptCount(group: ServerGroup<McpPromptInfo>): number {
-  const enabled = new Set(group.server.enabledPrompts ?? []);
-  if (enabled.size === 0) return 0;
-  let n = 0;
-  for (const p of group.items) {
-    if (enabled.has(p.name)) n++;
-  }
-  return n;
-}
-
-function isToolEnabled(server: McpServerConfig, toolName: string): boolean {
-  return !(server.disabledTools ?? []).includes(toolName);
-}
-
-function isPromptEnabled(
-  server: McpServerConfig,
-  promptName: string,
+/** True when at least one of the item's tags is currently enabled.
+ * Untagged items defer to the `__untagged` sentinel so the user can still
+ * silence them as a bucket. Mirrors the rule the palette renders against
+ * (`enabled if any tag is on`) so chip counts and the model binding agree. */
+function itemEnabledByTags(
+  tags: readonly string[] | undefined,
+  isTagEnabled: (tag: string) => boolean,
 ): boolean {
-  return (server.enabledPrompts ?? []).includes(promptName);
+  if (!tags || tags.length === 0) return isTagEnabled(UNTAGGED_TAG);
+  for (const tag of tags) if (isTagEnabled(tag)) return true;
+  return false;
 }
 
 interface ToolChipProps {
@@ -937,588 +921,7 @@ function ToolChip({
   );
 }
 
-interface McpDiscoveryPopoverProps {
-  readonly tools: readonly ServerGroup<McpToolInfo>[];
-  readonly prompts: readonly ServerGroup<McpPromptInfo>[];
-  readonly resources: readonly ServerGroup<McpResourceInfo>[];
-  readonly itemState: Readonly<
-    Record<string, "running" | { error: string }>
-  >;
-  readonly onClose: () => void;
-  readonly onToggleTool: (
-    serverId: string,
-    toolName: string,
-    nextEnabled: boolean,
-  ) => void;
-  readonly onTogglePrompt: (
-    serverId: string,
-    promptName: string,
-    nextEnabled: boolean,
-  ) => void;
-  readonly onReadResource: (
-    server: McpServerConfig,
-    resource: McpResourceInfo,
-  ) => void;
-  readonly popoverRef?: React.Ref<HTMLDivElement>;
-}
 
-function McpDiscoveryPopover({
-  tools,
-  prompts,
-  resources,
-  itemState,
-  onClose,
-  onToggleTool,
-  onTogglePrompt,
-  onReadResource,
-  popoverRef,
-}: McpDiscoveryPopoverProps) {
-  const totalAdvertised =
-    tools.reduce((a, g) => a + g.items.length, 0) +
-    prompts.reduce((a, g) => a + g.items.length, 0) +
-    resources.reduce((a, g) => a + g.items.length, 0);
-  const errors = [
-    ...tools
-      .filter((g) => g.listError)
-      .map((g) => ({ server: g.server, kind: "tools", error: g.listError! })),
-    ...prompts
-      .filter((g) => g.listError)
-      .map((g) => ({
-        server: g.server,
-        kind: "prompts",
-        error: g.listError!,
-      })),
-    ...resources
-      .filter((g) => g.listError)
-      .map((g) => ({
-        server: g.server,
-        kind: "resources",
-        error: g.listError!,
-      })),
-  ];
-
-  return (
-    <div
-      ref={popoverRef}
-      className="mcp-menu"
-      role="dialog"
-      aria-label="Connected MCP servers"
-    >
-      <header className="mcp-menu-head">
-        <div>
-          <div className="mcp-menu-title">
-            MCP
-            <span className="mcp-menu-count">{totalAdvertised}</span>
-          </div>
-          <div className="mcp-menu-hint">
-            Toggle a tag to enable every tool and prompt under it. Click a
-            resource chip to attach its contents.
-          </div>
-        </div>
-        <button
-          type="button"
-          className="mcp-menu-close"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          <CloseIcon />
-        </button>
-      </header>
-
-      {totalAdvertised === 0 && errors.length === 0 ? (
-        <p className="mcp-menu-empty">
-          Connected, but no tools, prompts, or resources were advertised.
-        </p>
-      ) : (
-        <UnifiedByServerThenTag
-          tools={tools}
-          prompts={prompts}
-          resources={resources}
-          errors={errors}
-          itemState={itemState}
-          onToggleTool={onToggleTool}
-          onTogglePrompt={onTogglePrompt}
-          onReadResource={onReadResource}
-        />
-      )}
-    </div>
-  );
-}
-
-const UNTAGGED = "Untagged";
-
-interface UnifiedItem {
-  readonly server: McpServerConfig;
-  readonly kind: "tool" | "prompt" | "resource";
-  /** Stable key per item: tool/prompt name, or resource uri. */
-  readonly id: string;
-  /** Display text on the chip. */
-  readonly label: string;
-  readonly description: string | undefined;
-  readonly tags: readonly string[];
-  /** Resource-only — passed back to onReadResource on click. */
-  readonly resource?: McpResourceInfo;
-}
-
-interface UnifiedTagBucket {
-  readonly tag: string;
-  readonly items: readonly UnifiedItem[];
-}
-
-function tagsOrUntagged(tags: readonly string[] | undefined): readonly string[] {
-  return tags && tags.length > 0 ? tags : [UNTAGGED];
-}
-
-function UnifiedByServerThenTag({
-  tools,
-  prompts,
-  resources,
-  errors,
-  itemState,
-  onToggleTool,
-  onTogglePrompt,
-  onReadResource,
-}: {
-  readonly tools: readonly ServerGroup<McpToolInfo>[];
-  readonly prompts: readonly ServerGroup<McpPromptInfo>[];
-  readonly resources: readonly ServerGroup<McpResourceInfo>[];
-  readonly errors: readonly {
-    readonly server: McpServerConfig;
-    readonly kind: string;
-    readonly error: string;
-  }[];
-  readonly itemState: McpDiscoveryPopoverProps["itemState"];
-  readonly onToggleTool: McpDiscoveryPopoverProps["onToggleTool"];
-  readonly onTogglePrompt: McpDiscoveryPopoverProps["onTogglePrompt"];
-  readonly onReadResource: McpDiscoveryPopoverProps["onReadResource"];
-}) {
-  /** Index every server by id, then collect each server's items into one
-   * flat list keyed by `(kind, name|uri)`. We bucket per-tag *within* a
-   * server below — the same tag from two servers stays in two distinct
-   * subsections so toggling one server doesn't fan out to the other. */
-  const perServer = useMemo(() => {
-    const byId = new Map<string, McpServerConfig>();
-    const items = new Map<string, UnifiedItem[]>();
-    const collect = (server: McpServerConfig, item: UnifiedItem) => {
-      byId.set(server.id, server);
-      let list = items.get(server.id);
-      if (!list) {
-        list = [];
-        items.set(server.id, list);
-      }
-      list.push(item);
-    };
-    for (const g of tools) {
-      for (const t of g.items) {
-        collect(g.server, {
-          server: g.server,
-          kind: "tool",
-          id: t.name,
-          label: t.name,
-          description: t.description,
-          tags: t.tags ?? [],
-        });
-      }
-    }
-    for (const g of prompts) {
-      for (const p of g.items) {
-        collect(g.server, {
-          server: g.server,
-          kind: "prompt",
-          id: p.name,
-          label: p.name,
-          description: p.description,
-          tags: p.tags ?? [],
-        });
-      }
-    }
-    for (const g of resources) {
-      for (const r of g.items) {
-        collect(g.server, {
-          server: g.server,
-          kind: "resource",
-          id: r.uri,
-          label: r.name || r.uri,
-          description: r.mimeType,
-          tags: r.tags ?? [],
-          resource: r,
-        });
-      }
-    }
-    return Array.from(items.entries())
-      .map(([serverId, list]) => ({
-        server: byId.get(serverId)!,
-        items: list,
-      }))
-      .sort((a, b) => a.server.name.localeCompare(b.server.name));
-  }, [tools, prompts, resources]);
-
-  return (
-    <div className="mcp-menu-groups">
-      {errors.map((e) => (
-        <p
-          key={`${e.server.id}::${e.kind}`}
-          className="mcp-menu-section-error"
-        >
-          <strong>
-            {e.server.name} · {e.kind}/list
-          </strong>
-          : {e.error}
-        </p>
-      ))}
-      {perServer.map(({ server, items }) => (
-        <ServerTagBlock
-          key={server.id}
-          server={server}
-          items={items}
-          itemState={itemState}
-          onToggleTool={onToggleTool}
-          onTogglePrompt={onTogglePrompt}
-          onReadResource={onReadResource}
-        />
-      ))}
-    </div>
-  );
-}
-
-function ServerTagBlock({
-  server,
-  items,
-  itemState,
-  onToggleTool,
-  onTogglePrompt,
-  onReadResource,
-}: {
-  readonly server: McpServerConfig;
-  readonly items: readonly UnifiedItem[];
-  readonly itemState: McpDiscoveryPopoverProps["itemState"];
-  readonly onToggleTool: McpDiscoveryPopoverProps["onToggleTool"];
-  readonly onTogglePrompt: McpDiscoveryPopoverProps["onTogglePrompt"];
-  readonly onReadResource: McpDiscoveryPopoverProps["onReadResource"];
-}) {
-  const buckets: readonly UnifiedTagBucket[] = useMemo(() => {
-    const map = new Map<string, UnifiedItem[]>();
-    for (const item of items) {
-      for (const tag of tagsOrUntagged(item.tags)) {
-        let list = map.get(tag);
-        if (!list) {
-          list = [];
-          map.set(tag, list);
-        }
-        list.push(item);
-      }
-    }
-    return Array.from(map.entries())
-      .map(([tag, list]) => ({ tag, items: list }))
-      .sort((a, b) => {
-        if (a.tag === UNTAGGED) return 1;
-        if (b.tag === UNTAGGED) return -1;
-        return a.tag.localeCompare(b.tag);
-      });
-  }, [items]);
-
-  return (
-    <section className="mcp-menu-section">
-      <div className="mcp-menu-section-head">
-        <span className="mcp-menu-section-name">{server.name}</span>
-        <span className="mcp-menu-section-count">{items.length}</span>
-      </div>
-      <div className="mcp-menu-subgroups">
-        {buckets.map(({ tag, items: bucket }) => (
-          <TagSubsection
-            key={tag}
-            server={server}
-            tag={tag}
-            items={bucket}
-            itemState={itemState}
-            onToggleTool={onToggleTool}
-            onTogglePrompt={onTogglePrompt}
-            onReadResource={onReadResource}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-/** Returns the current "is this item considered active?" boolean. Resources
- * have no enable state — they're click-to-read — so they're always reported
- * active for counting purposes and excluded from the bulk toggle. */
-function isItemActive(item: UnifiedItem): boolean {
-  if (item.kind === "tool") return isToolEnabled(item.server, item.id);
-  if (item.kind === "prompt") return isPromptEnabled(item.server, item.id);
-  return true;
-}
-
-function TagSubsection({
-  server,
-  tag,
-  items,
-  itemState,
-  onToggleTool,
-  onTogglePrompt,
-  onReadResource,
-}: {
-  readonly server: McpServerConfig;
-  readonly tag: string;
-  readonly items: readonly UnifiedItem[];
-  readonly itemState: McpDiscoveryPopoverProps["itemState"];
-  readonly onToggleTool: McpDiscoveryPopoverProps["onToggleTool"];
-  readonly onTogglePrompt: McpDiscoveryPopoverProps["onTogglePrompt"];
-  readonly onReadResource: McpDiscoveryPopoverProps["onReadResource"];
-}) {
-  const togglable = items.filter((i) => i.kind !== "resource");
-  const enabledCount = togglable.filter(isItemActive).length;
-  const allEnabled = togglable.length > 0 && enabledCount === togglable.length;
-
-  const onToggleAll = (next: boolean) => {
-    for (const item of togglable) {
-      if (isItemActive(item) === next) continue;
-      if (item.kind === "tool") onToggleTool(item.server.id, item.id, next);
-      else if (item.kind === "prompt")
-        onTogglePrompt(item.server.id, item.id, next);
-    }
-  };
-
-  return (
-    <div className="mcp-menu-subsection">
-      <label className="mcp-menu-subsection-head">
-        {togglable.length > 0 ? (
-          <Switch
-            checked={allEnabled}
-            onChange={onToggleAll}
-            ariaLabel={`Enable all in ${tag}`}
-          />
-        ) : (
-          <span className="mcp-switch-pill" aria-hidden data-placeholder>
-            <span className="mcp-switch-thumb" />
-          </span>
-        )}
-        <span className="mcp-menu-subsection-name">{tag}</span>
-        {togglable.length > 0 ? (
-          <span className="mcp-menu-section-count">
-            {enabledCount}/{togglable.length}
-          </span>
-        ) : (
-          <span className="mcp-menu-section-count">{items.length}</span>
-        )}
-      </label>
-      <ul className="mcp-tool-chips">
-        {items.map((item) => {
-          const active = isItemActive(item);
-          const clickable = item.kind === "resource";
-          const runState = clickable
-            ? itemState[`${item.server.id}::resource::${item.id}`]
-            : undefined;
-          const running = runState === "running";
-          const error =
-            runState && typeof runState === "object" && "error" in runState
-              ? runState.error
-              : undefined;
-          const title =
-            error ?? item.description ?? (clickable ? item.id : undefined);
-          const chipProps = {
-            className: "mcp-tool-chip",
-            "data-kind": item.kind,
-            "data-off": active ? undefined : true,
-            "data-running": running || undefined,
-            "data-error": error ? true : undefined,
-            title,
-          } as const;
-          if (clickable && item.resource) {
-            return (
-              <li key={`${item.kind}:${item.id}`} className="mcp-tool-chip-li">
-                <button
-                  type="button"
-                  {...chipProps}
-                  onClick={() =>
-                    item.resource && onReadResource(item.server, item.resource)
-                  }
-                  disabled={running}
-                >
-                  {item.label}
-                </button>
-              </li>
-            );
-          }
-          return (
-            <li
-              key={`${item.kind}:${item.id}`}
-              className="mcp-tool-chip-li"
-            >
-              <span {...chipProps}>{item.label}</span>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-function Switch({
-  checked,
-  onChange,
-  ariaLabel,
-}: {
-  readonly checked: boolean;
-  readonly onChange: (next: boolean) => void;
-  readonly ariaLabel: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={ariaLabel}
-      className="mcp-switch-pill"
-      data-on={checked || undefined}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onChange(!checked);
-      }}
-    >
-      <span className="mcp-switch-thumb" aria-hidden />
-    </button>
-  );
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-// -- Built-in tools popover --------------------------------------------
-
-interface BuiltinDiscoveryPopoverProps {
-  readonly tools: readonly BuiltinToolDef[];
-  readonly isEnabled: (name: string) => boolean;
-  readonly enabledCount: number;
-  readonly onToggle: (name: string, enabled: boolean) => void;
-  readonly onClose: () => void;
-  readonly popoverRef?: React.Ref<HTMLDivElement>;
-}
-
-/** Sibling of {@link McpDiscoveryPopover}, scoped to local Tauri-backed
- * tools (Read / Write / Edit / Glob / Grep). All tools default to enabled
- * — the toggle simply hides one from the model on subsequent sends. Reuses
- * the MCP menu's class names so the popover inherits the same visual
- * shell without bespoke styles. */
-function BuiltinDiscoveryPopover({
-  tools,
-  isEnabled,
-  enabledCount,
-  onToggle,
-  onClose,
-  popoverRef,
-}: BuiltinDiscoveryPopoverProps) {
-  return (
-    <div
-      ref={popoverRef}
-      className="mcp-menu"
-      role="dialog"
-      aria-label="Helix Core tools"
-    >
-      <header className="mcp-menu-head">
-        <div>
-          <div className="mcp-menu-title">
-            Helix Core
-            <span className="mcp-menu-count">
-              {enabledCount}/{tools.length}
-            </span>
-          </div>
-          <div className="mcp-menu-hint">
-            Local Helix Core tools backed by the Rust runtime — File System
-            (Read, Write, Edit, Glob, Grep) and Data (Read Excel, Analyse
-            Data via Polars). Enabled by default; toggle individual chips
-            or flip a group's master switch to opt out for the next send.
-          </div>
-        </div>
-        <button
-          type="button"
-          className="mcp-menu-close"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          <CloseIcon />
-        </button>
-      </header>
-
-      <div className="mcp-menu-groups">
-        <section className="mcp-menu-section">
-          <div className="mcp-menu-section-head">
-            <span className="mcp-menu-section-name">Helix Core</span>
-            <span className="mcp-menu-section-count">{tools.length}</span>
-          </div>
-          <div className="mcp-menu-subgroups">
-            {bucketByGroup(tools).map(({ group, items }) => {
-              const groupEnabled = items.filter((t) => isEnabled(t.name)).length;
-              const allOn = groupEnabled === items.length;
-              return (
-                <div key={group} className="mcp-menu-subsection">
-                  <label className="mcp-menu-subsection-head">
-                    <Switch
-                      checked={allOn}
-                      onChange={(next) => {
-                        for (const t of items) {
-                          if (isEnabled(t.name) !== next) onToggle(t.name, next);
-                        }
-                      }}
-                      ariaLabel={`Enable all ${BUILTIN_GROUP_LABEL[group]} tools`}
-                    />
-                    <span className="mcp-menu-subsection-name">
-                      {BUILTIN_GROUP_LABEL[group]}
-                    </span>
-                    <span className="mcp-menu-section-count">
-                      {groupEnabled}/{items.length}
-                    </span>
-                  </label>
-                  <ul className="mcp-tool-chips">
-                    {items.map((t) => {
-                      const on = isEnabled(t.name);
-                      return (
-                        <li key={t.name} className="mcp-tool-chip-li">
-                          <button
-                            type="button"
-                            className="mcp-tool-chip"
-                            data-kind="tool"
-                            data-off={on ? undefined : true}
-                            title={t.description}
-                            aria-pressed={on}
-                            onClick={() => onToggle(t.name, !on)}
-                          >
-                            {t.label}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-/** Bucket the catalogue by `group` while preserving catalogue order both
- * across groups and within them. Stable order means the popover doesn't
- * shift around on re-render. */
-function bucketByGroup(
-  tools: readonly BuiltinToolDef[],
-): readonly { group: BuiltinToolGroup; items: BuiltinToolDef[] }[] {
-  const map = new Map<BuiltinToolGroup, BuiltinToolDef[]>();
-  for (const t of tools) {
-    let bucket = map.get(t.group);
-    if (!bucket) {
-      bucket = [];
-      map.set(t.group, bucket);
-    }
-    bucket.push(t);
-  }
-  return Array.from(map.entries()).map(([group, items]) => ({ group, items }));
-}
 
 function HammerIcon() {
   return (

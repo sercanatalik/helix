@@ -81,10 +81,12 @@ interface MessageViewProps {
 function MessageView({ message, stale = false }: MessageViewProps) {
   const streaming = message.status === "streaming";
   const isAssistant = message.role === "assistant";
-  // Tool rows are a streaming affordance — they show what the model is
-  // doing while it works, then disappear once the response is finalized.
-  // The result is folded into the assistant text the user actually reads.
-  const toolCalls = streaming ? message.toolCalls ?? [] : [];
+  // Tool rows ride along on every assistant message — live during streaming,
+  // then collapsed under a one-line summary once the message finalizes so
+  // the prose answer wins the visual hierarchy. The collapsed form keeps a
+  // breadcrumb (server, tool names, retries, total time) the user can
+  // expand if they need to audit what ran.
+  const toolCalls = message.toolCalls ?? [];
   const reasoning = message.reasoning ?? "";
   const reasoningStreaming =
     streaming && message.reasoningStatus !== "complete";
@@ -110,7 +112,7 @@ function MessageView({ message, stale = false }: MessageViewProps) {
           />
         ) : null}
         {isAssistant && toolCalls.length > 0 ? (
-          <ToolCallsBlock calls={toolCalls} />
+          <ToolCallGroupList calls={toolCalls} streaming={streaming} />
         ) : null}
         {showStatusLine ? <StreamingStatus verb={verb} /> : null}
         {isAssistant ? (
@@ -255,21 +257,195 @@ function ReasoningBlock({
 
 /* ---------- Inline tool-call indicators ---------- */
 
-/* Claude Code style: a flat, single-line row per tool call — status dot,
- * tool name, arg preview in parens, duration when done. No expand, no
- * artifact pane: the result is implicit (the model uses it to produce the
- * next text block). Errors flip the dot and tint the row. */
-function ToolCallsBlock({
+/** Walk the message's tool calls in order and break them into runs of
+ * contiguous calls that share a `serverName`. Each run becomes either a
+ * single inline row (one success → looks identical to before) or a
+ * collapsible group with a one-line summary header — the new default once
+ * a message has multiple calls or a retry pattern. */
+function ToolCallGroupList({
   calls,
+  streaming,
 }: {
   readonly calls: readonly ToolCallRecord[];
+  readonly streaming: boolean;
 }) {
+  const groups = useMemo(() => groupCalls(calls), [calls]);
   return (
-    <ul className="tool-block" role="list">
-      {calls.map((call, idx) => (
-        <ToolRow key={call.id || idx} call={call} />
-      ))}
-    </ul>
+    <div className="tool-block" role="list">
+      {groups.map((group, idx) => {
+        // A solo successful call stays inline — wrapping a single ✓ row in
+        // a collapsible header would be more chrome than information. Any
+        // error or any second call promotes the run to the group treatment.
+        const promote = group.calls.length >= 2 || group.retries > 0;
+        if (!promote) {
+          const only = group.calls[0]!;
+          return <ToolRow key={only.id || `${idx}:${only.toolName}`} call={only} />;
+        }
+        return (
+          <ToolCallGroup
+            key={`${group.serverName}:${idx}`}
+            group={group}
+            streaming={streaming}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+interface CallGroup {
+  /** The server every call in this group was routed to. Falls back to
+   * "tools" when `serverName` was undefined (built-in tools or older
+   * transcripts persisted before the field existed). */
+  readonly serverName: string;
+  readonly calls: readonly ToolCallRecord[];
+  /** N consecutive errors followed by a success on the same tool name —
+   * surfaced in the header as a `retried Nx` pill. */
+  readonly retries: number;
+  /** Sum of `durationMs` across every completed call in the group, in ms.
+   * Errors with no duration contribute 0; the user reads it as
+   * wall-clock-time-spent-in-tools, not request count. */
+  readonly totalMs: number;
+}
+
+const FALLBACK_SERVER = "tools";
+
+function groupCalls(calls: readonly ToolCallRecord[]): readonly CallGroup[] {
+  const groups: CallGroup[] = [];
+  let current: ToolCallRecord[] = [];
+  let currentServer: string | undefined;
+  const flush = () => {
+    if (current.length === 0) return;
+    groups.push(buildGroup(currentServer ?? FALLBACK_SERVER, current));
+    current = [];
+    currentServer = undefined;
+  };
+  for (const call of calls) {
+    const server = call.serverName ?? FALLBACK_SERVER;
+    if (currentServer !== undefined && server !== currentServer) {
+      flush();
+    }
+    currentServer = server;
+    current.push(call);
+  }
+  flush();
+  return groups;
+}
+
+function buildGroup(
+  serverName: string,
+  calls: readonly ToolCallRecord[],
+): CallGroup {
+  let retries = 0;
+  // Retry detection: walk the run, and for any consecutive `error → … →
+  // ok` pattern on the same tool name, count the failures as retries. We
+  // don't try to be clever about argument equality — same tool, same
+  // server, error-then-success is the LLM-loop signature we want to
+  // collapse, and accidentally combining unrelated errors is harmless
+  // (the user can still expand the group to see them in detail).
+  for (let i = 0; i < calls.length; i++) {
+    const call = calls[i]!;
+    if (effectiveStatus(call) !== "complete") continue;
+    let back = i - 1;
+    while (back >= 0) {
+      const prior = calls[back]!;
+      if (prior.toolName !== call.toolName) break;
+      if (effectiveStatus(prior) !== "error") break;
+      retries++;
+      back--;
+    }
+  }
+  let totalMs = 0;
+  for (const call of calls) {
+    if (typeof call.durationMs === "number") totalMs += call.durationMs;
+  }
+  return { serverName, calls, retries, totalMs };
+}
+
+function effectiveStatus(call: ToolCallRecord): ToolCallStatus {
+  if (call.status) return call.status;
+  if (call.isError) return "error";
+  return "complete";
+}
+
+function ToolCallGroup({
+  group,
+  streaming,
+}: {
+  readonly group: CallGroup;
+  readonly streaming: boolean;
+}) {
+  // Mirror the reasoning block: open while streaming so the user can see
+  // every call land in real time, collapse the moment the message
+  // finalizes. Manual toggles after that always win.
+  const [open, setOpen] = useState<boolean>(streaming);
+  const previouslyStreamingRef = useRef(streaming);
+  useEffect(() => {
+    if (previouslyStreamingRef.current && !streaming) {
+      setOpen(false);
+    } else if (!previouslyStreamingRef.current && streaming) {
+      setOpen(true);
+    }
+    previouslyStreamingRef.current = streaming;
+  }, [streaming]);
+
+  const errorCount = group.calls.reduce(
+    (n, c) => (effectiveStatus(c) === "error" ? n + 1 : n),
+    0,
+  );
+  const running = group.calls.some((c) => effectiveStatus(c) === "running");
+  const headerStatus: ToolCallStatus = running
+    ? "running"
+    : errorCount > 0
+      ? "error"
+      : "complete";
+  // Distinct names rather than total count — the user wants to know
+  // *what* the model called, not how many SQL retries happened (the
+  // retry pill already covers that).
+  const distinctTools = Array.from(
+    new Set(group.calls.map((c) => c.toolName)),
+  );
+
+  return (
+    <div className="tool-call-group" data-open={open || undefined}>
+      <button
+        type="button"
+        className="tool-call-group-head"
+        data-status={headerStatus}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ToolStatusIcon status={headerStatus} />
+        <span className="tool-call-group-summary">
+          <b>
+            {group.calls.length} tool {group.calls.length === 1 ? "call" : "calls"}
+          </b>
+          <span className="tool-call-group-on">on</span>
+          <span className="tool-call-group-server">{group.serverName}</span>
+          {group.retries > 0 ? (
+            <span className="tool-call-group-retry">
+              retried {group.retries}×
+            </span>
+          ) : null}
+          <span className="tool-call-group-tools">
+            {distinctTools.join(" · ")}
+          </span>
+        </span>
+        {group.totalMs > 0 ? (
+          <span className="tool-call-group-duration">
+            {formatDuration(group.totalMs)}
+          </span>
+        ) : null}
+        <ChevronIcon open={open} />
+      </button>
+      {open ? (
+        <div className="tool-call-group-body">
+          {group.calls.map((call, idx) => (
+            <ToolRow key={call.id || idx} call={call} />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

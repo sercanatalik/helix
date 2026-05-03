@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
-import { Button } from "./ui";
-import { KeyValueList } from "../features/providers/key-value-list";
-import type { KeyValuePair } from "../features/providers";
+import { Button } from "../../components/ui";
+import { KeyValueList } from "../providers/key-value-list";
+import type { KeyValuePair } from "../providers";
 import type {
   CustomHeader,
   McpServerConfig,
@@ -9,7 +9,7 @@ import type {
   McpServerRuntime,
   McpTestResult,
   McpTransport,
-} from "../app/types";
+} from "../../app/types";
 
 type TestState =
   | { kind: "idle" }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { Badge, Button } from "./ui";
-import { useSkills } from "../hooks/use-skills";
-import type { Skill } from "../app/types";
+import { Badge, Button } from "../../components/ui";
+import { useSkills } from "../../hooks/use-skills";
+import type { Skill } from "../../app/types";
 
 /** Settings → Skills pane.
  *

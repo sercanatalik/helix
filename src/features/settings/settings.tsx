@@ -1,7 +1,7 @@
 import { useState, type ComponentType } from "react";
 import { ProvidersPane } from "../providers";
-import { McpPane } from "../../components/mcp-pane";
-import { SkillsPane } from "../../components/skills-pane";
+import { McpPane } from "./mcp-pane";
+import { SkillsPane } from "./skills-pane";
 import { AppearancePane } from "./appearance";
 import { GeneralPane } from "./general";
 

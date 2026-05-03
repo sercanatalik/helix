@@ -1,18 +1,18 @@
 import { useMemo, useState } from "react";
-import { useMcpServers } from "../hooks/use-mcp-servers";
+import { useMcpServers } from "../../hooks/use-mcp-servers";
 import {
   MCP_SERVER_PRESETS,
   type McpServerPreset,
-} from "../lib/mcp/presets";
-import { Badge, Button } from "./ui";
-import { cardSurface } from "./ui/card";
-import { cn } from "../lib/utils";
+} from "../../lib/mcp/presets";
+import { Badge, Button } from "../../components/ui";
+import { cardSurface } from "../../components/ui/card";
+import { cn } from "../../lib/utils";
 import { McpForm } from "./mcp-form";
 import type {
   McpConnectionStatus,
   McpServerConfig,
   McpServerInput,
-} from "../app/types";
+} from "../../app/types";
 
 type Mode =
   | { kind: "list" }

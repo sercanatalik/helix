@@ -227,14 +227,14 @@ function NoteEditor({
     };
   }, [initialContent, onReloadFromDisk]);
 
-  const dirty = content !== initialContent && savedAt === note.modifiedAt;
+  // The debounced save loop above guarantees every change lands on disk
+  // within SAVE_DEBOUNCE_MS, so there's no useful "unsaved" state to show.
+  // Surface only the in-flight write or a hard failure.
   const status = saveError
     ? `save failed: ${saveError}`
     : saving
       ? "saving…"
-      : dirty
-        ? "unsaved"
-        : "saved";
+      : "saved";
 
   return (
     <section className="note-editor">

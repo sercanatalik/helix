@@ -45,15 +45,18 @@ export function CodeMirrorEditor({ initialDoc, onChange }: CodeMirrorEditorProps
             onChangeRef.current(update.state.doc.toString());
           }
         }),
+        // Match the chat transcript's streamdown body: same 14px / 1.62
+        // rhythm and the app's --font-mono token so a markdown file in the
+        // raw editor reads at the same scale as the rendered chat output.
         EditorView.theme({
           "&": {
             height: "100%",
-            fontSize: "13.5px",
+            fontSize: "14px",
+            color: "var(--fg)",
           },
           ".cm-scroller": {
-            fontFamily:
-              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-            lineHeight: "1.55",
+            fontFamily: "var(--font-mono)",
+            lineHeight: "1.62",
           },
           ".cm-content": {
             padding: "16px 4px",

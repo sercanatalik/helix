@@ -16,8 +16,16 @@ import {
   injectMathIntoBlocks,
   preProcessDisplayMath,
 } from "./inject-math";
+import { useTheme } from "../../hooks/use-theme";
+import type { ThemeId } from "../../themes";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
+
+/** Map a helix theme id to the dark/light flavour BlockNote's mantine
+ * variant understands. Two of our four themes are dark; the rest light. */
+function blocknoteFlavourFor(theme: ThemeId): "dark" | "light" {
+  return theme === "dark" || theme === "meridian-dark" ? "dark" : "light";
+}
 
 interface BlockNoteEditorProps {
   readonly initialMarkdown: string;
@@ -38,6 +46,8 @@ export function BlockNoteEditor({
   initialMarkdown,
   onChange,
 }: BlockNoteEditorProps) {
+  const { theme } = useTheme();
+  const blockNoteTheme = blocknoteFlavourFor(theme);
   // Build the schema once per mount. `useMemo` matters here: re-creating
   // the schema on every render would also re-create the editor below
   // (since `useCreateBlockNote` depends on it) and wipe the document.
@@ -122,8 +132,8 @@ export function BlockNoteEditor({
   }, [editor]);
 
   return (
-    <div className="blocknote-host">
-      <BlockNoteView editor={editor} theme="light" />
+    <div className="blocknote-host" data-theme-flavour={blockNoteTheme}>
+      <BlockNoteView editor={editor} theme={blockNoteTheme} />
     </div>
   );
 }

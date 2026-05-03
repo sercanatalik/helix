@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { TreeEntry } from "../lib/tauri-api";
+import { ConfirmDialog } from "./confirm-dialog";
 import type { NoteId, NoteRecord, WorkspaceRecord } from "./types";
 
 interface WorkspacePanelProps {
@@ -40,6 +41,9 @@ export function WorkspacePanel({
   // Local expand/collapse state, keyed by folder path. Defaults to "open" for
   // the root level (depth 0) so the user sees something on first paint.
   const [expansion, setExpansion] = useState<Record<string, boolean>>({});
+  // The note the user has asked to delete. While set, the confirm dialog
+  // is open; null means no pending deletion.
+  const [pendingDelete, setPendingDelete] = useState<NoteRecord | null>(null);
 
   const fetchTree = useCallback(async (path: string) => {
     try {
@@ -181,7 +185,7 @@ export function WorkspacePanel({
           activeId={activeNoteId}
           loading={notesLoading}
           onSelect={onSelectNote}
-          onDelete={onDeleteNote}
+          onRequestDelete={(note) => setPendingDelete(note)}
           onOpenWindow={onOpenNoteWindow}
         />
         <div className="panel-section-label">
@@ -208,6 +212,20 @@ export function WorkspacePanel({
           ))
         )}
       </div>
+      {pendingDelete ? (
+        <ConfirmDialog
+          title={`Delete "${pendingDelete.title}"?`}
+          description={`This removes ${pendingDelete.relativePath} from disk. This can't be undone.`}
+          confirmLabel="Delete"
+          destructive
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => {
+            const target = pendingDelete;
+            setPendingDelete(null);
+            void onDeleteNote(target.id);
+          }}
+        />
+      ) : null}
     </aside>
   );
 }
@@ -217,7 +235,9 @@ interface PanelNotesSectionProps {
   readonly activeId: NoteId | undefined;
   readonly loading: boolean;
   readonly onSelect: (id: NoteId) => void;
-  readonly onDelete: (id: NoteId) => Promise<void> | void;
+  /** Trash icon clicked. The panel decides what UI (confirm dialog) to show
+   * before actually calling the destructive backend op. */
+  readonly onRequestDelete: (note: NoteRecord) => void;
   readonly onOpenWindow: (note: NoteRecord) => void;
 }
 
@@ -226,7 +246,7 @@ function PanelNotesSection({
   activeId,
   loading,
   onSelect,
-  onDelete,
+  onRequestDelete,
   onOpenWindow,
 }: PanelNotesSectionProps) {
   return (
@@ -249,7 +269,7 @@ function PanelNotesSection({
             active={n.id === activeId}
             onSelect={() => onSelect(n.id)}
             onOpenWindow={() => onOpenWindow(n)}
-            onDelete={() => void onDelete(n.id)}
+            onRequestDelete={() => onRequestDelete(n)}
           />
         ))
       )}
@@ -262,10 +282,16 @@ interface NoteRowProps {
   readonly active: boolean;
   readonly onSelect: () => void;
   readonly onOpenWindow: () => void;
-  readonly onDelete: () => void;
+  readonly onRequestDelete: () => void;
 }
 
-function NoteRow({ note, active, onSelect, onOpenWindow, onDelete }: NoteRowProps) {
+function NoteRow({
+  note,
+  active,
+  onSelect,
+  onOpenWindow,
+  onRequestDelete,
+}: NoteRowProps) {
   return (
     <div
       className="note-row"
@@ -302,9 +328,7 @@ function NoteRow({ note, active, onSelect, onOpenWindow, onDelete }: NoteRowProp
         aria-label="Delete note"
         onClick={(e) => {
           e.stopPropagation();
-          if (window.confirm(`Delete "${note.title}"? This removes it from disk.`)) {
-            onDelete();
-          }
+          onRequestDelete();
         }}
       >
         <TrashIcon />

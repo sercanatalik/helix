@@ -1,0 +1,717 @@
+/* ---------- Settings ---------- */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  flex: 1;
+  min-height: 0;
+}
+.settings-nav {
+  border-right: 1px solid var(--border-subtle);
+  padding: 16px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  transition: background 100ms ease, color 100ms ease;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+.settings-nav-item:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.settings-nav-item[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-weight: 500;
+}
+.settings-pane {
+  overflow-y: auto;
+  padding: 24px 32px 60px;
+  max-width: 720px;
+  width: 100%;
+}
+.settings-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  margin: 0 0 4px;
+}
+.settings-section-desc {
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  margin: 0 0 18px;
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+/* ---------- Field primitives (settings forms) ---------- */
+.field-group {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  padding: 14px 16px 16px;
+  margin: 0 0 14px;
+}
+.field-legend {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  padding: 0 6px;
+  margin-left: -6px;
+}
+.field-group-desc {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  margin: 4px 0 12px;
+  line-height: 1.45;
+}
+.field-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.field-hint {
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  line-height: 1.4;
+}
+.field-note {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin: 0;
+  padding: 8px 0 2px;
+}
+.field-input {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-raw);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12.5px;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.field-input.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.field-input:focus {
+  border-color: var(--accent-ring);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---------- MCP enable toggle ---------- */
+.mcp-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+}
+.mcp-switch input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-ring);
+  margin: 0;
+  cursor: pointer;
+}
+
+/* ---------- MCP discovery chips ---------- */
+.mcp-chips-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0 8px;
+}
+.mcp-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mcp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-raw);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.mcp-chip:hover:not([data-disabled]) {
+  border-color: var(--border-strong);
+  background: var(--bg-elev-2);
+}
+.mcp-chip[data-active] {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+  color: var(--accent-raw);
+}
+/* Connected but the server didn't advertise any items — keep the chip
+ * clickable so the user can confirm that's actually what happened. */
+.mcp-chip[data-empty]:not([data-active]) {
+  color: var(--fg-muted);
+}
+.mcp-chip[data-empty]:not([data-active]) .mcp-chip-icon,
+.mcp-chip[data-empty]:not([data-active]) .mcp-chip-chevron {
+  color: var(--fg-dim);
+}
+/* Reserved for the actually-not-connected state (connecting / error). */
+.mcp-chip[data-disabled] {
+  opacity: 0.55;
+  cursor: default;
+  color: var(--fg-dim);
+}
+.mcp-chip-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: currentColor;
+}
+.mcp-chip-label {
+  letter-spacing: -0.005em;
+}
+.mcp-chip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.mcp-chip[data-active] .mcp-chip-count {
+  background: var(--bg-elev);
+  border-color: color-mix(in oklab, var(--accent-raw) 30%, transparent);
+  color: var(--accent-raw);
+}
+.mcp-chip-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--fg-dim);
+  transition: transform 140ms ease;
+}
+.mcp-chip[data-active] .mcp-chip-chevron {
+  transform: rotate(180deg);
+  color: var(--accent-raw);
+}
+
+/* Expanded panel shown beneath the chips when one is active. */
+.mcp-discovery-empty {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--border-subtle);
+  background: var(--bg);
+  border-radius: 10px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  line-height: 1.5;
+}
+.mcp-discovery-empty-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-style: solid;
+  border-color: color-mix(in oklab, var(--danger-raw, #c53030) 40%, transparent);
+  background: color-mix(in oklab, var(--danger-raw, #c53030) 6%, var(--bg));
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.mcp-discovery-empty-error strong {
+  color: var(--danger-raw, #c53030);
+  font-weight: 600;
+}
+.mcp-discovery-empty-hint {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.mcp-discovery-list {
+  list-style: none;
+  padding: 10px 12px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  border-radius: 10px;
+}
+.mcp-discovery-item {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--fg);
+}
+.mcp-discovery-name {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg);
+}
+.mcp-discovery-desc {
+  color: var(--fg-muted);
+}
+.mcp-discovery-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+
+/* ---------- Auth-mode tabs ---------- */
+.auth-mode-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+.auth-mode-tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+.auth-mode-tab:hover {
+  color: var(--fg);
+  background: var(--bg-elev);
+}
+.auth-mode-tab[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--accent-raw) 35%, transparent);
+}
+
+/* ---------- Key/value list ---------- */
+.kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kv-empty {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  margin: 0;
+  padding: 4px 2px;
+  font-style: italic;
+}
+.kv-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.kv-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) auto;
+  gap: 5px;
+  align-items: center;
+}
+.kv-input {
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--border-raw);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.kv-input:focus {
+  border-color: var(--accent-ring);
+  box-shadow: 0 0 0 2.5px var(--accent-soft);
+}
+.kv-remove {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 16px;
+  line-height: 1;
+  font-family: var(--font-sans);
+  transition: background 120ms ease, color 120ms ease;
+}
+.kv-remove:hover {
+  background: var(--bg-elev-2);
+  color: var(--danger);
+}
+.kv-add {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  border-radius: 5px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--fg-muted);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.kv-add:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+  border-color: var(--accent-ring);
+}
+
+/* ---------- Providers pane ---------- */
+.providers-pane {
+  display: flex;
+  flex-direction: column;
+}
+.providers-section-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  margin: 18px 2px 8px;
+}
+.providers-section-label:first-of-type {
+  margin-top: 8px;
+}
+.providers-empty {
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  font-style: italic;
+  padding: 10px 2px 4px;
+  margin: 0;
+}
+.providers-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid var(--border-raw);
+  background: var(--bg-elev);
+  border-radius: 10px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.provider-row:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-elev-2);
+}
+.provider-row[data-disabled="true"] {
+  opacity: 0.6;
+}
+.provider-row-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  min-width: 0;
+  border-radius: 6px;
+}
+.provider-row-main:hover {
+  background: var(--bg);
+}
+.provider-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.provider-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.provider-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  min-width: 0;
+}
+.provider-row-url {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.provider-row-sep {
+  color: var(--fg-faint);
+}
+.provider-row-model {
+  color: var(--fg-muted);
+}
+.provider-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 6px;
+  flex-shrink: 0;
+}
+
+/* ---------- Preset grid (cards themselves wear cardSurface) ---------- */
+.preset-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+/* ---------- Provider form ---------- */
+.provider-form {
+  display: flex;
+  flex-direction: column;
+}
+.provider-form-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.provider-back {
+  align-self: flex-start;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  margin-left: -8px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.provider-back:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.provider-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+}
+.provider-form-actions .actions-spacer {
+  flex: 1;
+}
+.provider-test-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 6px;
+}
+.provider-test-hint {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  flex: 1;
+  min-width: 0;
+  padding-top: 8px;
+}
+.provider-test-result {
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid;
+  flex: 1;
+  min-width: 0;
+}
+.provider-test-result[data-state="ok"] {
+  color: var(--success);
+  background: color-mix(in oklab, var(--success) 12%, var(--bg-elev));
+  border-color: color-mix(in oklab, var(--success) 32%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.provider-test-result[data-state="fail"] {
+  color: var(--danger);
+  background: color-mix(in oklab, var(--danger) 10%, var(--bg-elev));
+  border-color: color-mix(in oklab, var(--danger) 32%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.provider-test-result-head {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+.provider-test-result-message {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.provider-test-result-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  word-break: break-all;
+  padding-top: 2px;
+}
+.provider-test-result-hint {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  line-height: 1.5;
+  padding-top: 4px;
+}
+.provider-test-result-body {
+  margin-top: 4px;
+  border-top: 1px solid color-mix(in oklab, var(--danger) 22%, transparent);
+  padding-top: 6px;
+}
+.provider-test-result-body summary {
+  cursor: pointer;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  user-select: none;
+}
+.provider-test-result-body summary:hover {
+  opacity: 1;
+}
+.provider-test-result-body pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: color-mix(in oklab, var(--danger) 6%, var(--bg));
+  border: 1px solid color-mix(in oklab, var(--danger) 18%, transparent);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+/* ---------- Skills pane (Settings → Skills) -------------------------- */
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.providers-section-hint {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  margin: 0 2px 8px;
+}
+.skill-row-detail {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.skill-detail-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  font-size: 11.5px;
+}
+.skill-detail-row {
+  display: contents;
+}
+.skill-detail-row dt {
+  font-weight: 600;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.skill-detail-row dd {
+  margin: 0;
+  color: var(--fg);
+  word-break: break-word;
+}
+.skill-detail-error {
+  color: var(--danger);
+}
+

@@ -1,0 +1,348 @@
+/* ---------- Streamdown markdown ----------
+ * Inline chips and the code-block header use --fg for text (AA-safe across
+ * themes) and reserve --accent-raw for the visual signals only: inline border,
+ * code-block left rule, header background tint. */
+.streamdown-content :not(pre) > code {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--accent-raw) 10%, var(--bg-elev));
+  border: 1px solid color-mix(in oklab, var(--accent-raw) 30%, transparent);
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.85em;
+}
+.streamdown-content pre,
+.streamdown-content [class*="code-block-body"] pre,
+.streamdown-content [class*="code-block"] {
+  border-left: 3px solid var(--accent-raw);
+  max-width: 100%;
+  overflow-x: auto;
+}
+.streamdown-content [class*="code-block-header"] {
+  background: color-mix(in oklab, var(--accent-raw) 6%, var(--bg-elev));
+  color: var(--fg);
+  font-size: 0.75rem;
+}
+.streamdown-content [class*="code-block-header"] [data-language] {
+  color: var(--fg-muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* Hover affordance for the copy/download icon buttons in the code header,
+ * which otherwise read as disabled at rest. */
+.streamdown-content [class*="code-block-header"] button:hover {
+  border: 1px solid var(--border-strong);
+  background: color-mix(in oklab, var(--accent-raw) 10%, var(--bg-elev-2));
+}
+
+/* Code block surface — paint with helix's panel bg so the block reads as a
+ * panel on the same surface family as the rest of the chat, not a foreign
+ * code-island bg from whatever Shiki theme is active. Syntax tokens (vitesse
+ * pair) still come from Shiki. */
+.streamdown-content .shiki,
+.streamdown-content figure.shiki,
+.streamdown-content [class*="code-block"] .shiki,
+.streamdown-content [class*="code-block-body"] {
+  background-color: var(--bg-elev) !important;
+  color: var(--fg);
+}
+
+/* Shiki dual-theme switch — @streamdown/code emits inline --shiki-light and
+ * --shiki-dark CSS vars on every token. By default Shiki shows the light
+ * variant; we explicitly flip to the dark variant under our dark themes. */
+:root[data-theme="dark"] .shiki span,
+:root[data-theme="meridian-dark"] .shiki span {
+  color: var(--shiki-dark) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+/* ---------- Markdown tables ----------
+ * Themed to match the rest of the app: hairline borders on the
+ * `--border-subtle` token, header strip lifted onto `--bg-elev`, accent
+ * underline below the header, and a subtle hover row tint pulled from
+ * `--accent-raw` so the visual language stays consistent with chips,
+ * code blocks, and chart artifacts. `display: block` lets a wide table
+ * scroll horizontally inside the chat column without bleeding past the
+ * transcript width. */
+.streamdown-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 14px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--bg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  font-family: var(--font-sans);
+  /* Quiet the native scrollbar so it doesn't compete with the chrome. */
+  scrollbar-width: thin;
+}
+.streamdown-content table thead {
+  background: var(--bg-elev);
+}
+.streamdown-content table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--fg);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-raw);
+  white-space: nowrap;
+  letter-spacing: -0.005em;
+}
+.streamdown-content table thead tr:last-child th {
+  /* Subtle accent rule under the header to echo the code-block left
+   * border treatment without shouting. */
+  box-shadow: inset 0 -1px 0 0
+    color-mix(in oklab, var(--accent-raw) 35%, transparent);
+}
+.streamdown-content table td {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--fg);
+  vertical-align: top;
+}
+.streamdown-content table tbody tr:first-child td {
+  border-top: none;
+}
+.streamdown-content table tbody tr:nth-child(even) td {
+  /* Light zebra so dense numeric rows are easy to track left-to-right
+   * without adding noise. Tinted toward `--bg-elev` so the contrast
+   * matches the header strip in feel. */
+  background: color-mix(in oklab, var(--bg-elev) 55%, transparent);
+}
+.streamdown-content table tbody tr:hover td {
+  background: color-mix(in oklab, var(--accent-raw) 7%, var(--bg-elev));
+}
+.streamdown-content table th:first-child,
+.streamdown-content table td:first-child {
+  padding-left: 14px;
+}
+.streamdown-content table th:last-child,
+.streamdown-content table td:last-child {
+  padding-right: 14px;
+}
+/* Numbers: tabular figures so columns of currency / percentages line up
+ * by digit place instead of by glyph width. */
+.streamdown-content table td {
+  font-variant-numeric: tabular-nums;
+}
+/* Inline code inside a cell: drop the chip border so the cell stays
+ * readable — the cell background already provides the panel cue. */
+.streamdown-content table :not(pre) > code {
+  border: none;
+  background: color-mix(in oklab, var(--accent-raw) 8%, transparent);
+  padding: 0.05rem 0.25rem;
+}
+/* Hide streamdown's table fullscreen toggle. We render in a desktop chat
+ * column where horizontal scroll already covers wide tables, and the icon
+ * sits over the first cell which obscures content. The streamdown button
+ * is plain `<button title="View fullscreen">` (no aria-label, no stable
+ * className), so we match on the title attribute and the data-streamdown
+ * value used by the fullscreen overlay. */
+.streamdown-content button[title*="fullscreen" i],
+.streamdown-content button[title*="full screen" i],
+.streamdown-content [data-streamdown="table-fullscreen"],
+.streamdown-content [data-streamdown*="fullscreen" i] {
+  display: none !important;
+}
+
+/* ---------- Vega chart artifact ----------
+ * Rendered for ```vega-lite / ```vega fenced blocks via the Streamdown
+ * custom renderer (see lib/markdown/plugins.ts). Mark/axis/legend colors
+ * come from the Vega config built in components/vega-chart-impl.tsx — this
+ * stylesheet only handles the surrounding chrome (container, action menu,
+ * tooltip) so they match the rest of the app. */
+.vega-chart {
+  margin: 8px 0;
+  padding: 14px 16px 10px;
+  border: 1px solid var(--border-raw);
+  border-left: 3px solid var(--accent-raw);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  overflow-x: auto;
+  position: relative;
+}
+/* Host element vega-embed mounts into. Explicit 100% width is what makes
+ * `"width": "container"` in the spec work — vega measures clientWidth at
+ * embed time and renders to that size. Without this the host shrinks to
+ * its intrinsic content width (zero) and the canvas comes out empty. */
+.vega-chart-host {
+  width: 100%;
+  display: block;
+}
+.vega-chart-host[data-vega-failed="true"] {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--danger-raw, #c53030);
+  white-space: pre-wrap;
+}
+.vega-chart canvas,
+.vega-chart svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+.vega-chart .vega-embed {
+  width: 100%;
+  font-family: var(--font-sans);
+}
+/* Toolbar of save actions anchored to the chart's top-right corner. The
+ * group is positioned absolutely; individual buttons are subtle by default
+ * and light up on chart hover or keyboard focus. Handlers live in
+ * vega-chart-impl.tsx — currently PNG and CSV. */
+.vega-chart-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: inline-flex;
+  gap: 4px;
+}
+.vega-chart-save {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  color: var(--fg-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease,
+    background 120ms ease;
+}
+.vega-chart:hover .vega-chart-save,
+.vega-chart-save:focus-visible {
+  opacity: 1;
+}
+.vega-chart-save:hover {
+  color: var(--fg);
+  border-color: var(--border-raw);
+  background: var(--bg-elev-2);
+}
+.vega-chart-save:focus-visible {
+  outline: 2px solid var(--accent-raw);
+  outline-offset: 1px;
+}
+/* The vega-embed action menu — three-dot button + dropdown for "save as png"
+ * etc. Default styling is a generic browser dropdown; restyle to match the
+ * code-block header buttons. */
+.vega-chart .vega-embed .vega-actions {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-raw);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 4px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--fg);
+}
+.vega-chart .vega-embed .vega-actions a {
+  display: block;
+  padding: 5px 10px;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 100ms ease, color 100ms ease;
+}
+.vega-chart .vega-embed .vega-actions a:hover {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.vega-chart .vega-embed .vega-actions::before,
+.vega-chart .vega-embed .vega-actions::after {
+  display: none;
+}
+.vega-chart .vega-embed details[open] > summary,
+.vega-chart .vega-embed summary {
+  color: var(--fg-dim);
+  opacity: 0.55;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.vega-chart .vega-embed summary:hover,
+.vega-chart .vega-embed details[open] > summary {
+  color: var(--fg);
+  opacity: 1;
+}
+/* Vega tooltips render into a `.vg-tooltip` element appended to <body>, so
+ * they're outside .vega-chart's scope — selectors target the global element
+ * but stay theme-token-driven. */
+.vg-tooltip,
+#vg-tooltip-element.vg-tooltip {
+  background: var(--bg-elev-2) !important;
+  border: 1px solid var(--border-raw) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow-md) !important;
+  color: var(--fg) !important;
+  font-family: var(--font-sans) !important;
+  font-size: 11.5px !important;
+  padding: 6px 9px !important;
+}
+.vg-tooltip td.key {
+  color: var(--fg-dim) !important;
+  font-weight: 500 !important;
+  padding-right: 8px !important;
+}
+.vg-tooltip td.value {
+  color: var(--fg) !important;
+  font-family: var(--font-mono) !important;
+  font-size: 11px !important;
+}
+.vg-tooltip h2 {
+  color: var(--fg) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  margin: 0 0 4px !important;
+  padding-bottom: 4px !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+}
+.vega-chart--pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.vega-chart-pending-label::before {
+  content: "▮";
+  margin-right: 6px;
+  color: var(--accent-raw);
+  animation: vega-chart-pulse 1.1s ease-in-out infinite;
+}
+@keyframes vega-chart-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+.vega-chart--error {
+  border-left-color: var(--danger);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vega-chart-error-head {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.vega-chart-error-body {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+

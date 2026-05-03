@@ -13,7 +13,13 @@
 @import "../themes/meridian-light.css";
 @import "./base.css";
 @import "./layout.css";
-@import "./components.css";
+@import "./components/sidebar.css";
+@import "./components/chat.css";
+@import "./components/markdown.css";
+@import "./components/forms.css";
+@import "./components/panel.css";
+@import "./components/notes.css";
+@import "./components/dialog.css";
 
 @tailwind base;
 @tailwind components;

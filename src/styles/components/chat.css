@@ -1,0 +1,1422 @@
+/* ---------- Transcript shell ---------- */
+.transcript {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.transcript-inner {
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 28px 28px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.msg {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 18px;
+}
+.msg-role {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  padding-top: 4px;
+  user-select: none;
+}
+.msg-role[data-role="user"] {
+  color: var(--accent-raw);
+}
+.msg-role[data-role="assistant"] {
+  color: var(--fg-muted);
+}
+.msg-content {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.62;
+}
+
+/* ---------- Composer ---------- */
+.composer-wrap {
+  padding: 0 28px 20px;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+.composer-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  flex-wrap: wrap;
+}
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 9px;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elev);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.tool-chip:hover:not([data-disabled="true"]) {
+  color: var(--fg);
+  border-color: var(--border-strong);
+  background: var(--bg-elev-2);
+}
+.tool-chip[data-active="true"] {
+  border-color: color-mix(in oklab, var(--accent-raw) 35%, transparent);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.tool-chip[data-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.tool-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-dim);
+}
+.tool-chip-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 0 4px;
+  color: var(--fg-muted);
+  min-width: 18px;
+  text-align: center;
+}
+.tool-chip[data-active="true"] .tool-chip-count {
+  background: var(--bg);
+  border-color: color-mix(in oklab, var(--accent-raw) 30%, transparent);
+  color: var(--accent-raw);
+}
+.composer-tools-spacer {
+  flex: 1;
+}
+
+/* ---------- Composer context chips (loaded prompts / resources) ---------- */
+.composer-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 4px 0;
+}
+.composer-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 9px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, var(--accent-raw) 28%, transparent);
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-size: 11px;
+  max-width: 280px;
+}
+.composer-context-kind {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-raw);
+  font-weight: 600;
+}
+.composer-context-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.composer-context-remove {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.composer-context-remove:hover {
+  color: var(--fg);
+  background: var(--bg-elev-2);
+}
+
+/* ---------- MCP palette (tag-grouped toolbox) ---------- */
+/* Top-level groups are tags pulled from the MCP server's own taxonomy.
+ * Items repeat under every tag they carry — the same `chart_data` tool
+ * lives under both `#chart` and `#data` if the server advertises both.
+ * Toggles are tag-level only; users opt into capabilities, not individual
+ * functions. The cost footer dedupes — an item enabled via two tags
+ * counts once toward the budget. */
+.mcp-palette {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  margin: 6px 4px 0;
+  border: 1px solid var(--border-raw);
+  background: var(--bg-elev);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  max-height: 420px;
+  overflow: hidden;
+  font-family: var(--font-sans);
+}
+.mcp-palette-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.mcp-palette-search-icon {
+  color: var(--fg-dim);
+}
+.mcp-palette-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 13px;
+  color: var(--fg);
+  font-family: var(--font-sans);
+}
+.mcp-palette-kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg);
+}
+.mcp-palette-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  align-items: center;
+}
+.mcp-palette-filter {
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  color: var(--fg-muted);
+}
+.mcp-palette-filter[data-tag] {
+  font-family: var(--font-mono);
+}
+.mcp-palette-filter:hover {
+  color: var(--fg);
+}
+.mcp-palette-filter[data-active] {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.mcp-palette-filter[data-tag][data-active] {
+  color: var(--accent-raw);
+}
+.mcp-palette-filters-spacer {
+  flex: 1;
+}
+.mcp-palette-filters-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+.mcp-palette-body {
+  padding: 4px;
+  overflow-y: auto;
+}
+.mcp-palette-empty {
+  margin: 0;
+  padding: 14px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+.mcp-palette-error {
+  margin: 4px 10px 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--danger);
+  line-height: 1.4;
+}
+.mcp-palette-group {
+  margin: 2px 4px;
+}
+.mcp-palette-group-head {
+  display: grid;
+  grid-template-columns: 18px auto 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.mcp-palette-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--fg-dim);
+}
+.mcp-palette-group-chev {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 140ms ease;
+}
+.mcp-palette-group-chev[data-open] {
+  transform: rotate(90deg);
+}
+/* The tag itself is a button — clicking the pill toggles the group, just
+ * like the iOS switch on the right. The pill changes appearance to show
+ * its enabled state so the user can read state without scanning to the
+ * switch. Untagged groups italicize the label so they read as "everything
+ * the server didn't classify" rather than as a real tag. */
+.mcp-palette-tag-pill {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+.mcp-palette-tag-pill:hover {
+  color: var(--fg);
+}
+.mcp-palette-tag-pill[data-active] {
+  background: var(--accent-soft);
+  color: var(--accent-raw);
+  border-color: var(--accent-ring);
+}
+.mcp-palette-tag-pill[data-untagged] {
+  font-style: italic;
+}
+.mcp-palette-group-meta {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.mcp-palette-group-marker {
+  font-size: 9.5px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.mcp-palette-group-marker[data-state="on"] {
+  color: var(--success);
+}
+.mcp-palette-rows {
+  padding: 0 0 4px 18px;
+}
+/* Each tag group's items are further bucketed by kind so a `#chart` group
+ * with 4 tools and 1 prompt reads as two visual blocks instead of a flat
+ * mix. Empty kinds are hidden by the renderer, so a tools-only tag never
+ * shows a bare Prompts header. */
+.mcp-palette-kind {
+  margin-bottom: 2px;
+}
+.mcp-palette-kind-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 2px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.mcp-palette-kind-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+  flex-shrink: 0;
+}
+.mcp-palette-kind-head[data-kind="tool"] .mcp-palette-kind-dot {
+  background: var(--kind-tool);
+}
+.mcp-palette-kind-head[data-kind="prompt"] .mcp-palette-kind-dot {
+  background: var(--kind-prompt);
+}
+.mcp-palette-kind-head[data-kind="resource"] .mcp-palette-kind-dot {
+  background: var(--kind-resource);
+}
+.mcp-palette-kind-count {
+  color: var(--fg-faint);
+}
+.mcp-palette-row-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mcp-palette-row-li {
+  list-style: none;
+}
+.mcp-palette-row {
+  display: grid;
+  grid-template-columns: 8px auto 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 4px 10px 4px 4px;
+  border-radius: 5px;
+  background: transparent;
+  font-family: var(--font-sans);
+  color: inherit;
+  cursor: default;
+}
+.mcp-palette-row:hover {
+  background: var(--bg-elev-2);
+}
+.mcp-palette-row:not([data-enabled]) {
+  opacity: 0.45;
+}
+.mcp-palette-row[data-error] {
+  background: color-mix(in oklab, var(--danger) 8%, transparent);
+}
+.mcp-palette-row-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+}
+.mcp-palette-row[data-kind="tool"] .mcp-palette-row-dot {
+  background: var(--kind-tool);
+}
+.mcp-palette-row[data-kind="prompt"] .mcp-palette-row-dot {
+  background: var(--kind-prompt);
+}
+.mcp-palette-row[data-kind="resource"] .mcp-palette-row-dot {
+  background: var(--kind-resource);
+}
+.mcp-palette-row-name {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg);
+}
+.mcp-palette-row-desc {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.mcp-palette-row-server {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-elev-2);
+}
+.mcp-palette-row-kind {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.mcp-palette-row-action {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  cursor: pointer;
+}
+.mcp-palette-row-action:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+.mcp-palette-row-action:disabled {
+  cursor: progress;
+  color: var(--warn);
+}
+.mcp-palette-footer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg);
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+}
+.mcp-palette-footer-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.mcp-palette-footer-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+.mcp-palette-footer-count b,
+.mcp-palette-footer-cost b {
+  color: var(--fg);
+  font-weight: 600;
+}
+.mcp-palette-footer-sep,
+.mcp-palette-footer-dim {
+  color: var(--fg-dim);
+}
+.mcp-palette-footer-cost {
+  text-align: right;
+}
+.mcp-palette-footer-keys {
+  color: var(--fg-dim);
+}
+.mcp-palette-footer-keys kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 3px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  color: var(--fg-muted);
+}
+
+/* ---------- MCP discovery menu (Claude-Desktop-style) ---------- */
+.mcp-menu {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 4px 0;
+  border: 1px solid var(--border-raw);
+  background: var(--bg-elev);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.25);
+  max-height: 360px;
+  overflow: hidden;
+}
+.mcp-menu-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.mcp-menu-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+}
+.mcp-menu-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.mcp-menu-hint {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.mcp-menu-close {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.mcp-menu-close:hover {
+  color: var(--fg);
+  background: var(--bg-elev-2);
+}
+.mcp-menu-empty {
+  margin: 0;
+  padding: 14px 14px 18px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+.mcp-menu-groups {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  overflow-y: auto;
+}
+.mcp-menu-section + .mcp-menu-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+.mcp-menu-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.mcp-menu-section-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mcp-menu-section-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  font-weight: 400;
+}
+.mcp-menu-section-error {
+  margin: 4px 10px 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--danger-raw, #c53030);
+  line-height: 1.4;
+}
+.mcp-menu-subgroups {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mcp-menu-subsection {
+  display: flex;
+  flex-direction: column;
+}
+.mcp-menu-subsection-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.mcp-menu-subsection-head:hover {
+  background: var(--bg-elev-2);
+}
+.mcp-menu-subsection-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mcp-menu-subsection-head .mcp-menu-section-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+.mcp-tool-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 10px 8px 44px;
+  margin: 0;
+  list-style: none;
+}
+.mcp-tool-chip-li {
+  display: flex;
+  list-style: none;
+}
+.mcp-tool-chip {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.2;
+  padding: 3px 8px 3px 7px;
+  border-radius: 999px;
+  background: var(--bg-elev-1);
+  color: var(--fg-muted);
+  border: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 120ms ease, background 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.mcp-tool-chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--fg-dim);
+  flex: 0 0 auto;
+}
+.mcp-tool-chip[data-kind="tool"]::before {
+  background: var(--kind-tool);
+}
+.mcp-tool-chip[data-kind="prompt"]::before {
+  background: var(--kind-prompt);
+}
+.mcp-tool-chip[data-kind="resource"]::before {
+  background: var(--kind-resource);
+}
+.mcp-tool-chip[data-off] {
+  opacity: 0.4;
+}
+.mcp-tool-chip[data-error] {
+  border-color: var(--danger-raw, #c53030);
+  color: var(--danger-raw, #c53030);
+}
+button.mcp-tool-chip {
+  cursor: pointer;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+button.mcp-tool-chip:hover:not(:disabled) {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+}
+button.mcp-tool-chip:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.mcp-tool-chip[data-running] {
+  animation: mcp-chip-pulse 1.2s ease-in-out infinite;
+}
+@keyframes mcp-chip-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.mcp-menu-items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mcp-menu-item {
+  border-radius: 6px;
+}
+.mcp-menu-item:hover {
+  background: var(--bg-elev-2);
+}
+.mcp-menu-item-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  color: inherit;
+  font: inherit;
+}
+.mcp-menu-item-body:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+.mcp-menu-item-tool .mcp-menu-item-body {
+  cursor: default;
+}
+
+/* gcf-desktop-style toggle rows: switch on the left, then a single inline
+ * label that runs `name — description` like a manpage entry. Tighter than
+ * the action rows because there's no chevron taking up trailing space. */
+.mcp-menu-item-toggle {
+  border-radius: 4px;
+}
+.mcp-menu-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.mcp-menu-toggle-row:hover {
+  background: var(--bg-elev-2);
+}
+.mcp-menu-toggle-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg);
+  /* Allow wrapping for long descriptions, but keep code names intact. */
+  word-break: break-word;
+}
+.mcp-menu-item-sep {
+  color: var(--fg-dim);
+}
+.mcp-menu-item-server {
+  font-size: 11px;
+  color: var(--fg-dim);
+  margin-right: 4px;
+}
+.mcp-menu-item-desc-inline {
+  color: var(--fg-muted);
+}
+.mcp-menu-item-args {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.mcp-menu-item-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mcp-menu-item-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mcp-menu-item-desc {
+  font-size: 11px;
+  color: var(--fg-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.mcp-menu-item-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+.mcp-menu-item-error {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--danger-raw, #c53030);
+}
+.mcp-menu-item-action-trail {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-dim);
+}
+.mcp-menu-item-action:hover .mcp-menu-item-action-trail {
+  color: var(--fg);
+}
+
+/* Highlight `/skillname` at the start of a sent user message so the
+ * command portion stands out from any args that follow. */
+.msg-slash-token {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-raw);
+}
+
+/* iOS-style toggle pill */
+.mcp-switch-pill {
+  flex-shrink: 0;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  border: none;
+  padding: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+  position: relative;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.mcp-switch-pill[data-on] {
+  background: var(--accent-ring);
+  border-color: var(--accent-ring);
+}
+.mcp-switch-pill[data-placeholder] {
+  visibility: hidden;
+  pointer-events: none;
+}
+.mcp-switch-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: transform 140ms ease;
+}
+.mcp-switch-pill[data-on] .mcp-switch-thumb {
+  transform: translateX(12px);
+}
+
+@keyframes mcp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.mcp-menu-spinner {
+  animation: mcp-spin 800ms linear infinite;
+  color: var(--fg-muted);
+}
+.composer-active-model {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+/* ---------- Model picker chip + dropdown ---------- */
+.model-chip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.model-chip .model-chip-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  min-width: 280px;
+  max-width: 360px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-raw);
+  background: var(--bg-elev);
+  border-radius: 12px;
+  box-shadow: 0 -12px 32px -12px rgba(0, 0, 0, 0.3);
+  max-height: 360px;
+  overflow: hidden;
+}
+.model-menu-items {
+  overflow-y: auto;
+  padding: 4px;
+  margin: 0;
+  list-style: none;
+  max-height: 280px;
+}
+
+/* ---------- Context window usage chip ---------- */
+.context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elev);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.context-chip-bar {
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+.context-chip-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent-raw);
+  transition: width 200ms ease;
+}
+.context-chip[data-tone="warn"] .context-chip-fill {
+  background: oklch(0.78 0.18 75);
+}
+.context-chip[data-tone="warn"] {
+  color: oklch(0.78 0.18 75);
+  border-color: oklch(from var(--fg-muted) l c h / 0.4);
+}
+.context-chip[data-tone="danger"] .context-chip-fill {
+  background: var(--danger);
+}
+.context-chip[data-tone="danger"] {
+  color: var(--danger);
+  border-color: oklch(from var(--danger) l c h / 0.4);
+}
+.context-chip-pct {
+  letter-spacing: -0.01em;
+  min-width: 28px;
+  text-align: right;
+}
+.composer-card {
+  position: relative;
+  border: 1px solid var(--border-raw);
+  background: var(--bg-elev);
+  border-radius: 12px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+  box-shadow: var(--shadow-sm);
+}
+.composer-card:focus-within {
+  border-color: var(--accent-ring);
+  box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-soft);
+}
+.composer-card textarea {
+  width: 100%;
+  min-height: 60px;
+  max-height: 260px;
+  padding: 14px 14px 2px;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.55;
+  font-family: var(--font-sans);
+}
+.composer-card textarea::placeholder {
+  color: var(--fg-dim);
+}
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 8px 10px;
+  border-radius: 0 0 12px 12px;
+}
+.composer-hint {
+  flex: 1;
+  font-size: 11px;
+  color: var(--fg-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+}
+.composer-hint > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.composer-status {
+  font-size: 11.5px;
+  color: var(--danger);
+  background: color-mix(in oklab, var(--danger) 10%, var(--bg-elev));
+  border: 1px solid color-mix(in oklab, var(--danger) 30%, transparent);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+/* ---------- Reasoning ("Thinking…") block on assistant messages ---------- */
+.thinking-block {
+  margin: 0 0 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.thinking-block[data-streaming] {
+  border-color: color-mix(in oklab, var(--accent-raw) 22%, var(--border-subtle));
+}
+.thinking-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  transition: color 120ms ease, background 120ms ease;
+}
+.thinking-head:hover {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--fg-muted) 5%, transparent);
+}
+.thinking-block[data-open] .thinking-head {
+  color: var(--fg);
+}
+.thinking-label {
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+.thinking-block[data-streaming] .thinking-label {
+  color: var(--fg);
+  background: linear-gradient(
+    90deg,
+    var(--fg) 0%,
+    var(--fg) 30%,
+    var(--accent-raw) 50%,
+    var(--fg) 70%,
+    var(--fg) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: helix-thinking-shimmer 2.4s linear infinite;
+}
+@keyframes helix-thinking-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.thinking-head .tool-card-chevron {
+  margin-left: auto;
+  color: var(--fg-dim);
+}
+.thinking-body {
+  padding: 4px 10px 10px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg);
+  max-height: 280px;
+  overflow-y: auto;
+}
+.thinking-text {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- Streaming status (Claude Code parity) ----------
+ * One row: rotating verb followed by a blinking caret. No status dot —
+ * the caret carries the "still working" signal. */
+.streaming-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+.streaming-status-verb {
+  background: linear-gradient(
+    90deg,
+    var(--fg-muted) 0%,
+    var(--fg-muted) 30%,
+    var(--accent-raw) 50%,
+    var(--fg-muted) 70%,
+    var(--fg-muted) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: helix-thinking-shimmer 2.4s linear infinite;
+  font-weight: 500;
+}
+
+/* Reusable terminal-style caret. Used inline next to a rotating verb in
+ * StreamingStatus and in the ReasoningBlock head while it's streaming. */
+.blinking-cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  vertical-align: -0.18em;
+  background: var(--accent-raw);
+  border-radius: 1px;
+  flex-shrink: 0;
+  animation: helix-cursor-blink 1.05s steps(2) infinite;
+}
+@keyframes helix-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ---------- Inline tool-call rows (Claude Code style) ----------
+ * One flat line per call: status dot · tool name · (args preview) · duration.
+ * No expansion, no artifact pane — the result is implicit in the next text
+ * block the model produces. */
+.tool-block {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  min-width: 0;
+}
+.tool-row[data-status="error"] {
+  color: var(--danger, var(--danger-raw, #c53030));
+}
+.tool-row-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  flex-shrink: 0;
+}
+.tool-row[data-status="error"] .tool-row-name {
+  color: var(--danger, var(--danger-raw, #c53030));
+}
+.tool-row-args {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.tool-row-duration {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+.tool-status-icon {
+  flex-shrink: 0;
+}
+.tool-status-icon[data-status="complete"] {
+  color: var(--success, var(--accent-raw));
+}
+.tool-status-icon[data-status="error"] {
+  color: var(--danger-raw, #c53030);
+}
+.tool-status-spin {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.6px solid color-mix(in oklab, var(--accent-raw) 22%, transparent);
+  border-top-color: var(--accent-raw);
+  animation: helix-tool-spin 0.85s linear infinite;
+}
+
+/* ---------- Collapsed tool-call group ---------- */
+/* Promotes a contiguous run of MCP calls (≥2 calls or any retry) into a
+ * single summary line so the prose answer wins the visual hierarchy. The
+ * expanded body reuses the same `.tool-row` rendering as the inline case —
+ * nothing is lost, just hidden by default. */
+.tool-call-group {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  overflow: hidden;
+  margin: 4px 0;
+}
+.tool-call-group-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 9px 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+  color: inherit;
+}
+.tool-call-group-head:hover {
+  background: var(--bg-elev-2);
+}
+.tool-call-group-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--fg);
+}
+.tool-call-group-on {
+  color: var(--fg-dim);
+}
+.tool-call-group-server {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+}
+.tool-call-group-retry {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--warn);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent);
+}
+.tool-call-group-tools {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.tool-call-group-duration {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+.tool-call-group-head[data-status="error"] .tool-status-icon {
+  color: var(--warn);
+}
+.tool-call-group-body {
+  border-top: 1px solid var(--border-subtle);
+  padding: 6px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+@keyframes helix-tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Chevron for the Thinking block — kept in the tool namespace so the icon
+ * component stays single-source. */
+.tool-card-chevron {
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+
+.msg[data-status="error"] .msg-content {
+  color: var(--danger);
+}
+/* gcf-desktop-style "no active chat" screen — top-aligned card inside the
+ * transcript shell, with composer still rendered below. */
+.transcript-inner.empty-chat {
+  padding-top: 48px;
+}
+.empty-chat-card {
+  max-width: 540px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.empty-chat-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 14px 0 6px;
+  color: var(--fg);
+}
+.empty-chat-desc {
+  font-size: 13.5px;
+  color: var(--fg-muted);
+  margin: 0;
+  line-height: 1.55;
+}
+.empty-chat-desc kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+}
+
+/* ---------- Slash menu (Composer skills picker) --------------------- */
+.mcp-menu-item[data-active] {
+  background: var(--bg);
+  border-radius: 6px;
+}
+

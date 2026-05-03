@@ -1,0 +1,76 @@
+/* ---------- Modal dialog ---------- */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: oklch(0 0 0 / 0.45);
+  backdrop-filter: blur(2px);
+  animation: dialog-overlay-in 120ms ease;
+}
+@keyframes dialog-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.dialog-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-raw);
+  border-radius: calc(var(--radius) * 2);
+  box-shadow: var(--shadow-lg);
+  padding: 22px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: dialog-card-in 140ms ease;
+}
+@keyframes dialog-card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--fg);
+}
+.dialog-desc {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  margin: 0 0 4px;
+  line-height: 1.5;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+.dialog-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 2px;
+}
+.dialog-folder-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  flex: 1;
+  min-width: 0;
+}
+.dialog-folder-hint {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+}
+

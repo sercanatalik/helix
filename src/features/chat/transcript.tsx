@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "../../components/markdown";
 import type {
   ToolCallRecord,
@@ -33,12 +33,12 @@ export function Transcript({ messages, contextResetAt }: TranscriptProps) {
   // Find the index of the first message at-or-after the cutoff so we know
   // where to drop the divider. Skip the divider entirely when there's nothing
   // older than it (the reset would be a no-op visually).
-  const dividerBeforeId = (() => {
+  const dividerBeforeId = useMemo(() => {
     if (!contextResetAt) return null;
     const idx = messages.findIndex((m) => m.createdAt >= contextResetAt);
     if (idx <= 0) return null;
     return messages[idx]!.id;
-  })();
+  }, [messages, contextResetAt]);
 
   return (
     <section className="transcript scroll">
@@ -78,7 +78,13 @@ interface MessageViewProps {
   readonly stale?: boolean;
 }
 
-function MessageView({ message, stale = false }: MessageViewProps) {
+// Memoized so streaming token patches — which only mutate the active
+// assistant message — don't cascade re-renders across every prior message.
+// `use-chat`'s `patch` is a `prev.map(...)` that preserves identity for
+// untouched messages, so the default shallow compare is enough.
+const MessageView = memo(MessageViewImpl);
+
+function MessageViewImpl({ message, stale = false }: MessageViewProps) {
   const streaming = message.status === "streaming";
   const isAssistant = message.role === "assistant";
   // Tool rows ride along on every assistant message — live during streaming,

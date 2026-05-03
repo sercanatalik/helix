@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { Streamdown } from "streamdown";
 import { STREAMDOWN_PLUGINS } from "../lib/markdown/plugins";
 import { normalizeLatexDelimiters } from "../lib/markdown/normalize-latex";
@@ -10,7 +10,7 @@ interface MarkdownProps {
   readonly className?: string;
 }
 
-export function Markdown({ content, streaming = false, className }: MarkdownProps) {
+function MarkdownImpl({ content, streaming = false, className }: MarkdownProps) {
   const normalized = useMemo(
     () => normalizeCodePrefixes(normalizeLatexDelimiters(content)),
     [content],
@@ -26,3 +26,8 @@ export function Markdown({ content, streaming = false, className }: MarkdownProp
     </Streamdown>
   );
 }
+
+// Streamed transcripts patch the active assistant message every token —
+// memoizing here means every other message in the transcript skips both
+// the normalization pass and the Streamdown render entirely.
+export const Markdown = memo(MarkdownImpl);

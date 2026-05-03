@@ -251,6 +251,44 @@ export interface AnalyseResult {
   readonly preview: readonly DataPreviewRow[];
 }
 
+// -- Internet search ----------------------------------------------------
+//
+// Hits DuckDuckGo's HTML endpoint through the corporate proxy when one is
+// configured (Settings → Proxy). The Rust side rebuilds the reqwest client
+// per call so a config change picks up on the next search.
+
+export interface WebSearchProxy {
+  readonly enabled: boolean;
+  readonly host: string;
+  readonly port: number;
+  readonly username: string;
+  readonly password: string;
+}
+
+export interface WebSearchArgs {
+  readonly query: string;
+  /** Cap on results returned. Defaults to 8, hard ceiling 25. */
+  readonly limit?: number;
+  /** DuckDuckGo region code (`us-en`, `uk-en`, …). Optional. */
+  readonly region?: string;
+  /** Forwarded verbatim from `useProxy()` — `undefined` means no proxy. */
+  readonly proxy?: WebSearchProxy;
+}
+
+export interface WebSearchHit {
+  readonly title: string;
+  readonly url: string;
+  readonly snippet: string;
+}
+
+export interface WebSearchResponse {
+  readonly query: string;
+  readonly hits: readonly WebSearchHit[];
+  /** Set when DDG returned a result block we couldn't parse — surfaces in
+   * the rendered tool output without breaking the agent loop. */
+  readonly parseWarning?: string;
+}
+
 export const builtinToolsApi = {
   /** Read a file. Text files come back as a `cat -n`-style numbered slice
    * (default 2000 lines from the top); images/PDFs come back as a base64
@@ -347,4 +385,12 @@ export const builtinToolsApi = {
     invoke<AnalyseResult>("analyse_data", {
       args: { handle, operation: op },
     }),
+
+  /** Search the public web. Goes through DuckDuckGo's HTML endpoint and,
+   * when the user has configured one, the corporate proxy from Settings →
+   * Proxy. Pass `proxy` in every call — the dispatcher reads
+   * `useProxy()` at tool-call time and forwards it verbatim so a setting
+   * change applies to the next search without a process restart. */
+  webSearch: (args: WebSearchArgs): Promise<WebSearchResponse> =>
+    invoke<WebSearchResponse>("web_search", { args }),
 };

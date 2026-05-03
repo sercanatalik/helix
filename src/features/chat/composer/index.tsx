@@ -14,6 +14,7 @@ import { McpPalette } from "../mcp-palette";
 import { useMcpServers } from "../../../hooks/use-mcp-servers";
 import { useMcpEnabledTags } from "../../../hooks/use-mcp-enabled-tags";
 import { useModels } from "../../../hooks/use-models";
+import { useProxy } from "../../../hooks/use-proxy";
 import { useSkills } from "../../../hooks/use-skills";
 import type { ChatExtras, McpToolBinding } from "../../../hooks/use-chat";
 import type { ProviderConfig } from "../../providers";
@@ -170,6 +171,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const { isTagEnabled } = useMcpEnabledTags();
   const { skills, render: renderSkill } = useSkills();
   const builtinTools = useBuiltinTools();
+  const { config: proxyConfig } = useProxy();
 
   // Slash-command parser. The user types `/skill-name args…` or
   // `/builtin-command`; we open a filterable popover as soon as the
@@ -221,21 +223,24 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     return () => document.removeEventListener("mousedown", onDown);
   }, [builtinOpen]);
 
-  // Register the React-side clear handler and the active workspace folder
-  // so the built-in tool dispatcher can reach them. Module-level registry
-  // avoids threading these through the agent loop, which has no business
-  // knowing about UI affordances or the workspace concept.
+  // Register the React-side clear handler, the active workspace folder,
+  // and the corporate proxy snapshot so the built-in tool dispatcher can
+  // reach them. Module-level registry avoids threading these through the
+  // agent loop, which has no business knowing about UI affordances, the
+  // workspace concept, or proxy plumbing.
   useEffect(() => {
     setBuiltinUiHandlers({
       clearTranscript: onClearTranscript,
       workspacePath,
+      proxyConfig,
     });
     return () =>
       setBuiltinUiHandlers({
         clearTranscript: undefined,
         workspacePath: undefined,
+        proxyConfig: undefined,
       });
-  }, [onClearTranscript, workspacePath]);
+  }, [onClearTranscript, workspacePath, proxyConfig]);
 
   /** Discoverable skills shown to the model on every send. Mirrors Claude
    * Desktop's "metadata always pre-loaded" behaviour: name + description

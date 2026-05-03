@@ -5,6 +5,7 @@ import type {
   GrepResult,
   ReadExcelResult,
   SearchFilesResult,
+  WebSearchResponse,
 } from "../api/builtin-tools";
 
 // Result formatters for tool output. The dispatcher hands the model a
@@ -88,4 +89,24 @@ export function formatGrepResult(r: GrepResult): string {
     return rows.join("\n");
   });
   return blocks.join("\n\n");
+}
+
+/** Render web search hits as a numbered list the model can quote and link
+ * to. Snippets are kept verbatim — DDG strips most highlight markup before
+ * we even see them, and an unfiltered passthrough is faster than guessing
+ * what the model wants summarized. */
+export function formatWebSearchResult(r: WebSearchResponse): string {
+  const head = `Search: ${r.query}`;
+  if (r.hits.length === 0) {
+    const reason = r.parseWarning ?? "No results.";
+    return `${head}\n\n${reason}`;
+  }
+  const body = r.hits
+    .map((h, i) => {
+      const snippet = h.snippet ? `\n   ${h.snippet}` : "";
+      return `${i + 1}. ${h.title}\n   ${h.url}${snippet}`;
+    })
+    .join("\n\n");
+  const warn = r.parseWarning ? `\n\n[note] ${r.parseWarning}` : "";
+  return `${head}\n\n${body}${warn}`;
 }

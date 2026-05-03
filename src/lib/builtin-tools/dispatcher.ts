@@ -1,9 +1,10 @@
-import type { AnalyseOp } from "../api/builtin-tools";
+import type { AnalyseOp, WebSearchProxy } from "../api/builtin-tools";
 import {
   formatAnalyseResult,
   formatDataResult,
   formatGrepResult,
   formatSearchFilesResult,
+  formatWebSearchResult,
 } from "./formatters";
 
 /** Sentinel `serverId` used on every BuiltinToolBinding. `useChat` checks
@@ -29,6 +30,12 @@ interface BuiltinUiHandlers {
    * take a root default to it. Empty/unset means "no workspace folder" —
    * the dispatcher then leaves paths verbatim and the process CWD wins. */
   workspacePath?: string;
+  /** Corporate proxy config (Settings → Proxy). Forwarded into
+   * `web_search` so outbound HTTP routes through it; the renderer reads
+   * `useProxy()` and registers the snapshot here so the dispatcher
+   * doesn't need to import a hook. `undefined` (or `enabled: false`)
+   * means "no proxy". */
+  proxyConfig?: WebSearchProxy;
 }
 const uiHandlers: BuiltinUiHandlers = {};
 
@@ -299,6 +306,28 @@ export async function runBuiltinTool(
         }
         const r = await window.helixApi.analyseData(handle, op);
         return { result: formatAnalyseResult(r), isError: false };
+      }
+      case "web_search": {
+        const { query, limit, region } = args as {
+          query?: string;
+          limit?: number;
+          region?: string;
+        };
+        if (typeof query !== "string" || !query.trim()) {
+          return { result: "web_search: missing `query`", isError: true };
+        }
+        // Snapshot proxy at call time so a Settings change applies on the
+        // next search without restarting the agent loop. Only forward when
+        // enabled — `undefined` lets the Rust side skip the proxy builder
+        // entirely instead of constructing one with an empty host.
+        const proxy = uiHandlers.proxyConfig;
+        const r = await window.helixApi.webSearch({
+          query: query.trim(),
+          limit: typeof limit === "number" ? limit : undefined,
+          region: typeof region === "string" ? region : undefined,
+          proxy: proxy && proxy.enabled && proxy.host ? proxy : undefined,
+        });
+        return { result: formatWebSearchResult(r), isError: false };
       }
       default:
         return {

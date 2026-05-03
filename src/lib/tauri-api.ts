@@ -52,6 +52,10 @@ export type {
   SearchCountMatch,
   SearchFilesArgs,
   SearchFilesResult,
+  WebSearchArgs,
+  WebSearchHit,
+  WebSearchProxy,
+  WebSearchResponse,
   WriteFileResult,
 } from "./api/builtin-tools";
 export type { WriteNoteResult } from "./api/notes";

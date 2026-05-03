@@ -30,11 +30,12 @@ export const BUILTIN_SLASH_COMMANDS: readonly BuiltinSlashCommand[] = [
 
 /** Subgroups inside the Helix Core popover — mirror the MCP popover's
  * tag-bucket layout so each kind of capability gets its own master switch. */
-export type BuiltinToolGroup = "file_system" | "data";
+export type BuiltinToolGroup = "file_system" | "data" | "web";
 
 export const BUILTIN_GROUP_LABEL: Readonly<Record<BuiltinToolGroup, string>> = {
   file_system: "File System",
   data: "Data Tools",
+  web: "Web",
 };
 
 export interface BuiltinToolDef {
@@ -376,6 +377,35 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
         },
       },
       required: ["handle", "operation"],
+    },
+  },
+  {
+    name: "web_search",
+    label: "Web Search",
+    group: "web",
+    description:
+      "Search the public web via DuckDuckGo. Returns up to 8 results (title, URL, snippet) by default; cap with `limit` (max 25). Goes through the user's corporate proxy when one is configured in Settings → Proxy. Use this when the user asks for recent information, citations, or anything that requires up-to-date sources outside the model's training data.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "Natural-language search query. Same input you'd type into a search engine.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 25,
+          description: "Cap on results returned. Default 8.",
+        },
+        region: {
+          type: "string",
+          description:
+            "Optional DuckDuckGo region code (`us-en`, `uk-en`, `de-de`, …). Omit for the global default.",
+        },
+      },
+      required: ["query"],
     },
   },
 ];

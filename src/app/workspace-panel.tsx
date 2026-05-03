@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { TreeEntry } from "../lib/tauri-api";
-import type { WorkspaceRecord } from "./types";
+import type { NoteId, NoteRecord, WorkspaceRecord } from "./types";
 
 interface WorkspacePanelProps {
   readonly workspace: WorkspaceRecord;
   readonly onClose?: () => void;
+  // Notes integration. The panel is the only surface that exposes the notes
+  // list now — that's why these are required, not optional. The parent gates
+  // panel visibility on `workspace.path`, so a missing path can't reach here.
+  readonly notes: readonly NoteRecord[];
+  readonly activeNoteId: NoteId | undefined;
+  readonly notesLoading: boolean;
+  readonly onSelectNote: (id: NoteId) => void;
+  readonly onCreateNote: () => Promise<NoteRecord | undefined>;
+  readonly onDeleteNote: (id: NoteId) => Promise<void> | void;
+  /** Cmd/Ctrl+Shift+Click on a note row pops it into a detached window. */
+  readonly onOpenNoteWindow: (note: NoteRecord) => void;
 }
 
 type LoadState =
@@ -14,7 +25,17 @@ type LoadState =
   | { kind: "ok"; entries: readonly TreeEntry[] }
   | { kind: "error"; message: string };
 
-export function WorkspacePanel({ workspace, onClose }: WorkspacePanelProps) {
+export function WorkspacePanel({
+  workspace,
+  onClose,
+  notes,
+  activeNoteId,
+  notesLoading,
+  onSelectNote,
+  onCreateNote,
+  onDeleteNote,
+  onOpenNoteWindow,
+}: WorkspacePanelProps) {
   const [load, setLoad] = useState<LoadState>({ kind: "idle" });
   // Local expand/collapse state, keyed by folder path. Defaults to "open" for
   // the root level (depth 0) so the user sees something on first paint.
@@ -120,6 +141,15 @@ export function WorkspacePanel({ workspace, onClose }: WorkspacePanelProps) {
           <button
             type="button"
             className="panel-icon-btn"
+            onClick={() => void onCreateNote()}
+            title="New note"
+            aria-label="New note"
+          >
+            <NewNoteIcon />
+          </button>
+          <button
+            type="button"
+            className="panel-icon-btn"
             onClick={refresh}
             title="Refresh"
             aria-label="Refresh"
@@ -146,6 +176,17 @@ export function WorkspacePanel({ workspace, onClose }: WorkspacePanelProps) {
         </div>
       </div>
       <div className="panel-scroll scroll">
+        <PanelNotesSection
+          notes={notes}
+          activeId={activeNoteId}
+          loading={notesLoading}
+          onSelect={onSelectNote}
+          onDelete={onDeleteNote}
+          onOpenWindow={onOpenNoteWindow}
+        />
+        <div className="panel-section-label">
+          <span>Files</span>
+        </div>
         {load.kind === "loading" ? (
           <div className="panel-empty">Loading…</div>
         ) : load.kind === "error" ? (
@@ -168,6 +209,107 @@ export function WorkspacePanel({ workspace, onClose }: WorkspacePanelProps) {
         )}
       </div>
     </aside>
+  );
+}
+
+interface PanelNotesSectionProps {
+  readonly notes: readonly NoteRecord[];
+  readonly activeId: NoteId | undefined;
+  readonly loading: boolean;
+  readonly onSelect: (id: NoteId) => void;
+  readonly onDelete: (id: NoteId) => Promise<void> | void;
+  readonly onOpenWindow: (note: NoteRecord) => void;
+}
+
+function PanelNotesSection({
+  notes,
+  activeId,
+  loading,
+  onSelect,
+  onDelete,
+  onOpenWindow,
+}: PanelNotesSectionProps) {
+  return (
+    <div className="panel-notes">
+      <div className="panel-section-label">
+        <span>Notes</span>
+        <span className="panel-section-count">
+          {loading && notes.length === 0 ? "scanning…" : notes.length}
+        </span>
+      </div>
+      {notes.length === 0 ? (
+        <div className="panel-empty">
+          {loading ? "Scanning workspace…" : "No markdown files yet."}
+        </div>
+      ) : (
+        notes.map((n) => (
+          <NoteRow
+            key={n.id}
+            note={n}
+            active={n.id === activeId}
+            onSelect={() => onSelect(n.id)}
+            onOpenWindow={() => onOpenWindow(n)}
+            onDelete={() => void onDelete(n.id)}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+interface NoteRowProps {
+  readonly note: NoteRecord;
+  readonly active: boolean;
+  readonly onSelect: () => void;
+  readonly onOpenWindow: () => void;
+  readonly onDelete: () => void;
+}
+
+function NoteRow({ note, active, onSelect, onOpenWindow, onDelete }: NoteRowProps) {
+  return (
+    <div
+      className="note-row"
+      role="button"
+      tabIndex={0}
+      data-active={active || undefined}
+      title={`${note.relativePath} — ⌘⇧Click to open in a new window`}
+      onClick={(e) => {
+        // Cmd/Ctrl + Shift + Click pops the note out into its own Tauri
+        // window. Plain click (or any other modifier) selects in-pane.
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+          e.preventDefault();
+          onOpenWindow();
+          return;
+        }
+        onSelect();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+            onOpenWindow();
+          } else {
+            onSelect();
+          }
+        }
+      }}
+    >
+      <span className="note-row-title">{note.title}</span>
+      <span className="note-row-meta">{note.relativePath}</span>
+      <button
+        type="button"
+        className="note-row-delete"
+        aria-label="Delete note"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (window.confirm(`Delete "${note.title}"? This removes it from disk.`)) {
+            onDelete();
+          }
+        }}
+      >
+        <TrashIcon />
+      </button>
+    </div>
   );
 }
 
@@ -316,6 +458,43 @@ function CloseIcon() {
       aria-hidden
     >
       <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  );
+}
+
+function NewNoteIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+      <path d="M18 2v6M15 5h6" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
     </svg>
   );
 }

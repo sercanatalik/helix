@@ -2498,3 +2498,333 @@ button.mcp-tool-chip:disabled {
   background: var(--bg);
   border-radius: 6px;
 }
+
+/* ---------- Workspace panel: notes section -------------------------- */
+.panel-notes {
+  padding: 0 6px 8px;
+}
+.panel-section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+.panel-section-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.note-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  position: relative;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-muted);
+  transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+  margin-bottom: 1px;
+}
+.note-row:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.note-row[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--accent-raw) 35%, transparent);
+}
+.note-row-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.note-row-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-row-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 100ms ease, background 100ms ease, color 100ms ease,
+    border-color 100ms ease;
+}
+.note-row:hover .note-row-delete,
+.note-row:focus-within .note-row-delete {
+  opacity: 1;
+}
+.note-row-delete:hover {
+  background: color-mix(in oklab, var(--danger) 12%, var(--bg-elev));
+  color: var(--danger);
+  border-color: color-mix(in oklab, var(--danger) 35%, transparent);
+}
+
+/* ---------- Note editor conflict banner ----------------------------- */
+.note-editor-conflict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 18px;
+  background: color-mix(in oklab, var(--accent-raw) 8%, var(--bg));
+  border-bottom: 1px solid color-mix(in oklab, var(--accent-raw) 30%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.note-editor-conflict code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-elev);
+}
+.note-editor-conflict-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.note-editor-conflict-actions button {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+.note-editor-conflict-actions button:hover {
+  background: var(--bg-elev);
+}
+.note-editor-conflict-reload {
+  border-color: var(--accent-raw) !important;
+  color: var(--accent-raw) !important;
+}
+
+/* ---------- Inline KaTeX (BlockNote custom inline content) ---------- */
+.bn-inline-math {
+  display: inline-block;
+  vertical-align: middle;
+  padding: 0 2px;
+  user-select: all;
+}
+.bn-inline-math .katex {
+  font-size: inherit;
+}
+
+/* ---------- Display KaTeX (BlockNote custom block) ------------------ */
+.bn-math-block {
+  display: block;
+  padding: 12px 8px;
+  margin: 4px 0;
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  text-align: center;
+  user-select: all;
+  overflow-x: auto;
+}
+.bn-math-block .katex-display {
+  margin: 0;
+}
+
+/* ---------- Detached note window ------------------------------------ */
+.note-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+}
+.note-window-loading,
+.note-window-error {
+  padding: 24px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+}
+.note-window-error h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  margin: 0 0 8px;
+}
+.note-window-error pre {
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+/* ---------- Note editor --------------------------------------------- */
+.note-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg);
+}
+.note-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.note-editor-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.note-editor-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-editor-path {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.note-editor-status {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  min-width: 60px;
+  text-align: right;
+}
+.note-editor-status[data-saving] {
+  color: var(--accent-raw);
+}
+.note-editor-mode {
+  display: inline-flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
+.note-editor-mode button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 5px 10px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+.note-editor-mode button:hover {
+  color: var(--fg);
+}
+.note-editor-mode button[data-active] {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+}
+.note-editor-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.note-editor-loading,
+.note-editor-error {
+  padding: 24px;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+}
+.note-editor-error pre {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+.blocknote-host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.blocknote-host .bn-container {
+  flex: 1;
+  min-height: 0;
+}
+.codemirror-host {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+.codemirror-host .cm-editor {
+  height: 100%;
+}
+.codemirror-host .cm-editor.cm-focused {
+  outline: none;
+}
+.codemirror-host .cm-gutters {
+  background: var(--bg);
+  border-right: 1px solid var(--border-subtle);
+  color: var(--fg-faint);
+}

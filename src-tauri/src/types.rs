@@ -1,3 +1,4 @@
+use crate::notes::NoteRecord;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -343,4 +344,8 @@ pub struct DesktopAppState {
     /// Skills discovered under `~/.claude/skills` and the active
     /// workspace's `.claude/skills`. Live-updated as files change on disk.
     pub skills: Vec<Skill>,
+    /// Markdown notes scanned out of the active workspace folder. Empty
+    /// when no workspace is attached or when the active workspace has no
+    /// `.md` files. Refreshed on demand by `list_notes`.
+    pub notes: Vec<NoteRecord>,
 }

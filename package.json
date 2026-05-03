@@ -16,6 +16,15 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@blocknote/code-block": "^0.46.0",
+    "@blocknote/core": "^0.46.0",
+    "@blocknote/mantine": "^0.46.0",
+    "@blocknote/react": "^0.46.0",
+    "@codemirror/commands": "^6.7.0",
+    "@codemirror/lang-markdown": "^6.3.0",
+    "@codemirror/language": "^6.10.0",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.34.0",
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
     "@tauri-apps/api": "^2.11.0",

@@ -1,4 +1,5 @@
 use crate::mcp::{CallToolOutcome, McpManager, McpTestResult};
+use crate::notes::{self, NoteRecord};
 use crate::skills::{self, SkillsManager};
 use crate::types::{
     AppView, DesktopAppState, McpPromptResult, McpResourceResult, McpServerConfig, McpServerInput,
@@ -9,13 +10,18 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 /// Single source of truth for app state while in-memory. Persistence will
 /// arrive in a follow-up phase; the frontend already caches theme in
 /// localStorage to keep first paint snappy.
 pub type SharedState = Mutex<DesktopAppState>;
+
+/// Broadcast on every successful note write. All windows (including the
+/// one that wrote) receive it; sibling windows reload from disk if their
+/// editor isn't holding unsaved edits.
+const NOTE_CHANGED_EVENT: &str = "helix://note-changed";
 
 /// The MCP client manager — holds live `rmcp` connections and reconciles them
 /// against `DesktopAppState.mcp_servers`. Mutations to the server list trigger
@@ -544,6 +550,253 @@ pub fn render_skill(
     let raw = arguments.unwrap_or_default();
     let named = skill.arguments.clone().unwrap_or_default();
     Ok(skills::substitute_arguments(&skill.body, &raw, &named))
+}
+
+// -- Notes ----------------------------------------------------------------
+//
+// Markdown notes live as `.md` files inside the attached workspace folder.
+// The Rust side just reads + writes; the frontend keeps the active note id
+// of its own. We push the latest note list back into `DesktopAppState.notes`
+// so the same snapshot pattern as workspaces / sessions / skills applies.
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteNoteResult {
+    pub note: NoteRecord,
+    /// True when the file was renamed because the H1 changed and the prior
+    /// path was an `untitled-*.md` placeholder. The frontend swaps the
+    /// active id over to `note.id` on the strength of this flag.
+    pub renamed: bool,
+}
+
+fn store_notes(state: &State<'_, SharedState>, notes: Vec<NoteRecord>) {
+    state.lock().expect("state poisoned").notes = notes;
+}
+
+#[tauri::command]
+pub fn list_notes(
+    workspace_id: String,
+    workspace_path: String,
+    state: State<'_, SharedState>,
+) -> Result<Vec<NoteRecord>, String> {
+    let root = PathBuf::from(&workspace_path);
+    if workspace_path.is_empty() {
+        store_notes(&state, Vec::new());
+        return Ok(Vec::new());
+    }
+    if !root.exists() {
+        return Err(format!("workspace path does not exist: {workspace_path}"));
+    }
+    let scanned = notes::scan_workspace(&workspace_id, &root);
+    store_notes(&state, scanned.clone());
+    Ok(scanned)
+}
+
+#[tauri::command]
+pub fn read_note(path: String) -> Result<String, String> {
+    notes::read_note_content(Path::new(&path)).map_err(|e| e.to_string())
+}
+
+/// Persist a note's body to disk. When `renameIfUntitled` is true and the
+/// current filename matches `untitled-*.md`, we slugify the H1 and rename
+/// the file. Returns the (possibly new) record so the frontend can swap its
+/// active id without a follow-up scan.
+///
+/// On success we also emit a `helix://note-changed` event with the new
+/// record so sibling windows editing the same file can react. The writer's
+/// own window will see the event but mtime equality with its locally-cached
+/// `savedAt` lets it filter the echo out.
+#[tauri::command]
+pub fn write_note(
+    app: AppHandle,
+    workspace_id: String,
+    workspace_path: String,
+    path: String,
+    content: String,
+    rename_if_untitled: bool,
+    state: State<'_, SharedState>,
+) -> Result<WriteNoteResult, String> {
+    let root = PathBuf::from(&workspace_path);
+    let mut current_path = PathBuf::from(&path);
+    let mut renamed = false;
+
+    if rename_if_untitled
+        && current_path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .map(|n| n.starts_with("untitled-") && n.ends_with(".md"))
+            .unwrap_or(false)
+    {
+        let filename = current_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let (title, _) = notes::derive_title_and_snippet(&content, &filename);
+        // Only rename when the title actually came from an H1 — i.e. is
+        // different from the placeholder filename stem.
+        let placeholder_stem = current_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if !title.eq_ignore_ascii_case(&placeholder_stem) && !title.is_empty() {
+            let new_path = notes::unique_path_for_title(&root, &title);
+            if new_path != current_path {
+                // Write to new path first, then unlink old. If the unlink
+                // fails we end up with a duplicate rather than data loss.
+                std::fs::write(&new_path, &content).map_err(|e| e.to_string())?;
+                let _ = std::fs::remove_file(&current_path);
+                current_path = new_path;
+                renamed = true;
+            }
+        }
+    }
+
+    let note = if renamed {
+        // Already wrote to disk above — just rebuild the record.
+        let rec = crate::notes::scan_workspace(&workspace_id, &root)
+            .into_iter()
+            .find(|n| std::path::Path::new(&n.path) == current_path)
+            .ok_or_else(|| "failed to locate note after rename".to_string())?;
+        rec
+    } else {
+        notes::write_note_content(&workspace_id, &root, &current_path, &content)
+            .map_err(|e| e.to_string())?
+    };
+
+    // Refresh the cached list so the sidebar's mtime ordering stays sane
+    // even when a watcher event hasn't fired yet.
+    let scanned = notes::scan_workspace(&workspace_id, &root);
+    store_notes(&state, scanned);
+
+    // Notify all windows (this one included) that the file changed. The
+    // emitting window de-dupes the echo by comparing `note.modified_at`
+    // against its own `savedAt`.
+    let _ = app.emit(NOTE_CHANGED_EVENT, &note);
+
+    Ok(WriteNoteResult { note, renamed })
+}
+
+#[tauri::command]
+pub fn create_note(
+    workspace_id: String,
+    workspace_path: String,
+    state: State<'_, SharedState>,
+) -> Result<NoteRecord, String> {
+    let root = PathBuf::from(&workspace_path);
+    if !root.is_dir() {
+        return Err(format!("workspace is not a directory: {workspace_path}"));
+    }
+    let path = notes::next_untitled_path(&root)
+        .ok_or_else(|| "ran out of untitled-N slots in this workspace".to_string())?;
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "untitled".to_string());
+    let initial = format!("# {stem}\n\n");
+    let note = notes::write_note_content(&workspace_id, &root, &path, &initial)
+        .map_err(|e| e.to_string())?;
+    let scanned = notes::scan_workspace(&workspace_id, &root);
+    store_notes(&state, scanned);
+    Ok(note)
+}
+
+#[tauri::command]
+pub fn delete_note(
+    workspace_id: String,
+    workspace_path: String,
+    path: String,
+    state: State<'_, SharedState>,
+) -> Result<Vec<NoteRecord>, String> {
+    let target = PathBuf::from(&path);
+    if !target.starts_with(&workspace_path) {
+        return Err("refusing to delete a path outside the workspace".to_string());
+    }
+    if target.exists() {
+        std::fs::remove_file(&target).map_err(|e| e.to_string())?;
+    }
+    let root = PathBuf::from(&workspace_path);
+    let scanned = notes::scan_workspace(&workspace_id, &root);
+    store_notes(&state, scanned.clone());
+    Ok(scanned)
+}
+
+/// Build a NoteRecord for a single file. Used by detached note windows so
+/// they can hydrate the editor without paying for a full workspace scan.
+#[tauri::command]
+pub fn get_note_record(
+    workspace_id: String,
+    workspace_path: String,
+    path: String,
+) -> Result<NoteRecord, String> {
+    let root = PathBuf::from(&workspace_path);
+    let target = PathBuf::from(&path);
+    if !target.exists() {
+        return Err(format!("note path does not exist: {path}"));
+    }
+    notes::record_for_path(&workspace_id, &root, &target)
+        .ok_or_else(|| format!("failed to read note metadata: {path}"))
+}
+
+/// Open a note in its own Tauri webview window. Idempotent — calling with
+/// the same note id while a window already exists just focuses the
+/// existing one. The window receives workspace + note path via URL params
+/// and hydrates itself from `get_note_record` + `read_note`.
+///
+/// Conflict semantics: nothing prevents two windows from editing the same
+/// file concurrently. Last-write-wins by mtime; the watcher-driven rescan
+/// in the main window's notes list will eventually reflect the merged
+/// state but in-flight edits in the losing window will silently lose.
+#[tauri::command]
+pub fn open_note_window(
+    app: AppHandle,
+    workspace_id: String,
+    workspace_path: String,
+    note_path: String,
+    note_id: String,
+    title: String,
+) -> Result<(), String> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    let label = format!("note-{note_id}");
+
+    // Already open? Focus instead of opening a duplicate window.
+    if let Some(existing) = app.webview_windows().get(&label) {
+        existing.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    let mut url = String::from("index.html?window=note");
+    url.push_str(&format!(
+        "&workspaceId={}&workspacePath={}&notePath={}",
+        urlencoding(&workspace_id),
+        urlencoding(&workspace_path),
+        urlencoding(&note_path),
+    ));
+
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+        .title(format!("{title} — Helix"))
+        .inner_size(900.0, 700.0)
+        .min_inner_size(560.0, 400.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Minimal percent-encoder for the URL params we pass to detached windows.
+/// Only escapes the bytes that would otherwise break query-string parsing
+/// — paths can hold spaces, ampersands, hashes, and Unicode that we need
+/// to round-trip intact.
+fn urlencoding(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for byte in s.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(*byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 /// One-shot connection test against the supplied server input. Spawns a

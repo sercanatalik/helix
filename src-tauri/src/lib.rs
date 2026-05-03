@@ -2,6 +2,7 @@ mod commands;
 mod data_tools;
 mod mcp;
 mod mcp_defaults;
+mod notes;
 mod skills;
 mod tools;
 mod types;
@@ -184,6 +185,13 @@ pub fn run() {
             commands::set_skills_workspace,
             commands::reload_skills,
             commands::render_skill,
+            commands::list_notes,
+            commands::read_note,
+            commands::write_note,
+            commands::create_note,
+            commands::delete_note,
+            commands::get_note_record,
+            commands::open_note_window,
             tools::read_file,
             tools::read_pdf,
             tools::write_file,

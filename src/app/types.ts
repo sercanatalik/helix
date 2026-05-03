@@ -233,6 +233,23 @@ export interface Skill {
   readonly error?: string;
 }
 
+export type NoteId = string;
+
+/** A markdown note discovered by the Rust scanner under the active
+ * workspace folder. The id is a stable hash of the absolute path so the
+ * frontend's `activeNoteId` survives rescans + relaunches. */
+export interface NoteRecord {
+  readonly id: NoteId;
+  readonly workspaceId: WorkspaceId;
+  /** Absolute path on disk. Treated as opaque by the UI. */
+  readonly path: string;
+  /** Path relative to the workspace root, forward-slash separated. */
+  readonly relativePath: string;
+  readonly title: string;
+  readonly snippet: string;
+  readonly modifiedAt: Timestamp;
+}
+
 export interface DesktopAppState {
   readonly workspaces: readonly WorkspaceRecord[];
   readonly selectedWorkspaceId?: WorkspaceId;
@@ -245,6 +262,7 @@ export interface DesktopAppState {
   readonly mcpServers: readonly McpServerConfig[];
   readonly mcpRuntime: Readonly<Record<string, McpServerRuntime>>;
   readonly skills: readonly Skill[];
+  readonly notes: readonly NoteRecord[];
 }
 
 export function sessionKey(
@@ -264,5 +282,6 @@ export function createEmptyState(): DesktopAppState {
     mcpServers: [],
     mcpRuntime: {},
     skills: [],
+    notes: [],
   };
 }

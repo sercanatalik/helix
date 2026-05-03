@@ -248,3 +248,114 @@
 .breadcrumb-sep {
   color: var(--fg-faint);
 }
+
+/* ---------- Main dock (VSCode-style tab strip) ---------- */
+.main-dock {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-rail);
+  flex-shrink: 0;
+  min-height: 36px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.main-dock::-webkit-scrollbar {
+  display: none;
+}
+.dock-spacer {
+  flex: 1;
+  min-width: 8px;
+  -webkit-app-region: drag;
+}
+.dock-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  max-width: 220px;
+  padding: 0 8px 0 10px;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border-subtle);
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  position: relative;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 100ms ease, color 100ms ease;
+}
+.dock-tab:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.dock-tab[data-active="true"] {
+  background: var(--bg);
+  color: var(--fg);
+}
+.dock-tab[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent-raw);
+}
+.dock-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+.dock-tab[data-active="true"] .dock-tab-icon {
+  color: var(--accent-raw);
+}
+.dock-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.dock-tab-subtle {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  font-weight: 400;
+  margin-left: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.dock-tab-pinned {
+  /* Chat tab — no close button, but reserve a touch of right padding so
+   * its hit area matches the closeable note tabs visually. */
+  padding-right: 12px;
+}
+.dock-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  border-radius: 4px;
+  color: var(--fg-dim);
+  opacity: 0;
+  transition: opacity 100ms ease, background 100ms ease, color 100ms ease;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.dock-tab:hover .dock-tab-close,
+.dock-tab[data-active="true"] .dock-tab-close {
+  opacity: 1;
+}
+.dock-tab-close:hover {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+}

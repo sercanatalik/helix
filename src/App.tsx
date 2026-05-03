@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddWorkspaceDialog } from "./app/add-workspace-dialog";
+import { MainDock } from "./app/main-dock";
 import { WorkspacePanel } from "./app/workspace-panel";
 import { WorkspaceRail } from "./app/workspace-rail";
 import { Sidebar } from "./app/sidebar";
@@ -7,24 +8,42 @@ import { Titlebar } from "./app/titlebar";
 import {
   createEmptyState,
   type DesktopAppState,
+  type NoteId,
+  type NoteRecord,
   type SessionRecord,
   type TranscriptMessage,
+  type WorkspaceId,
   type WorkspaceRecord,
 } from "./app/types";
 import { Composer, Transcript } from "./features/chat";
+import { NoteEditorContainer } from "./features/notes";
 import { Settings } from "./features/settings";
 import { useProviders } from "./features/providers";
 import { useChat } from "./hooks/use-chat";
+import { useNotes } from "./hooks/use-notes";
 import { useSessions } from "./hooks/use-sessions";
 import { useWorkspaces } from "./hooks/use-workspaces";
+import {
+  loadOpenNoteIdsByWorkspace,
+  saveOpenNoteIdsByWorkspace,
+} from "./lib/notes/storage";
 
 export function App() {
   const [state, setState] = useState<DesktopAppState>(createEmptyState());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const workspacesApi = useWorkspaces();
   const sessionsApi = useSessions(workspacesApi.activeId);
+  const notesApi = useNotes(workspacesApi.activeWorkspace);
   const [isAddingWorkspace, setIsAddingWorkspace] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
+  // Per-workspace ordered list of open note tabs in the main dock. The
+  // active note id (owned by `useNotes`) decides which of these is focused.
+  const [openIdsByWorkspace, setOpenIdsByWorkspace] = useState<
+    Record<WorkspaceId, NoteId[]>
+  >(() => loadOpenNoteIdsByWorkspace());
+  useEffect(() => {
+    saveOpenNoteIdsByWorkspace(openIdsByWorkspace);
+  }, [openIdsByWorkspace]);
 
   const openAddWorkspace = useCallback(() => {
     setIsAddingWorkspace(true);
@@ -38,12 +57,14 @@ export function App() {
     [workspacesApi],
   );
 
+  // Notes are workspace-folder-only. Without an attached path the panel is
+  // hidden and notes can't be created — same gating as the file tree.
+  const hasWorkspacePath = !!workspacesApi.activeWorkspace?.path;
+
   // The right panel is meaningful only when the active workspace has a path
   // and the chat view (not settings) is active.
   const showPanel =
-    panelOpen &&
-    state.activeView !== "settings" &&
-    !!workspacesApi.activeWorkspace?.path;
+    panelOpen && state.activeView !== "settings" && hasWorkspacePath;
 
   const refresh = useCallback(async () => {
     try {
@@ -103,6 +124,150 @@ export function App() {
 
   const isSettings = state.activeView === "settings";
 
+  // Selecting a chat / creating a new conversation pulls the user out of
+  // note view by clearing `activeNoteId`. Selecting a note flips the main
+  // pane the other way. The panel and the chats sidebar each own one half
+  // of that swap.
+  const handleSelectSession = useCallback(
+    (id: string) => {
+      sessionsApi.setActive(id);
+      notesApi.setActive(undefined);
+    },
+    [sessionsApi, notesApi],
+  );
+
+  const handleCreateSession = useCallback(() => {
+    notesApi.setActive(undefined);
+    return sessionsApi.createSession();
+  }, [sessionsApi, notesApi]);
+
+  // ---- Dock open-tab helpers --------------------------------------------
+  const wsId = workspacesApi.activeId;
+  const openIds = wsId ? (openIdsByWorkspace[wsId] ?? []) : [];
+
+  // Resolve open ids against the live notes list. Drops any id that no
+  // longer maps to a real file (deleted on disk, moved out of workspace).
+  const openNotes = useMemo<readonly NoteRecord[]>(() => {
+    if (openIds.length === 0) return [];
+    const byId = new Map(notesApi.notes.map((n) => [n.id, n] as const));
+    const out: NoteRecord[] = [];
+    for (const id of openIds) {
+      const n = byId.get(id);
+      if (n) out.push(n);
+    }
+    return out;
+  }, [openIds, notesApi.notes]);
+
+  // Garbage-collect stale ids out of storage once the underlying scan
+  // confirms a note is gone. Runs only when the resolved set shrinks below
+  // the persisted set; a no-op otherwise.
+  useEffect(() => {
+    if (!wsId) return;
+    if (openIds.length === 0) return;
+    if (openIds.length === openNotes.length) return;
+    const live = new Set(openNotes.map((n) => n.id));
+    setOpenIdsByWorkspace((curr) => {
+      const list = curr[wsId] ?? [];
+      const next = list.filter((id) => live.has(id));
+      if (next.length === list.length) return curr;
+      return { ...curr, [wsId]: next };
+    });
+  }, [wsId, openIds, openNotes]);
+
+  const ensureOpen = useCallback(
+    (id: NoteId) => {
+      if (!wsId) return;
+      setOpenIdsByWorkspace((curr) => {
+        const list = curr[wsId] ?? [];
+        if (list.includes(id)) return curr;
+        return { ...curr, [wsId]: [...list, id] };
+      });
+    },
+    [wsId],
+  );
+
+  const handleOpenNote = useCallback(
+    (id: NoteId) => {
+      ensureOpen(id);
+      notesApi.setActive(id);
+    },
+    [ensureOpen, notesApi],
+  );
+
+  const handleCloseNote = useCallback(
+    (id: NoteId) => {
+      if (!wsId) return;
+      const list = openIdsByWorkspace[wsId] ?? [];
+      const idx = list.indexOf(id);
+      if (idx === -1) return;
+      const next = list.filter((x) => x !== id);
+      setOpenIdsByWorkspace((curr) => ({ ...curr, [wsId]: next }));
+      // If we just closed the focused tab, advance to the neighbour on
+      // the right (or fall back to chat if nothing's left).
+      if (notesApi.activeId === id) {
+        if (next.length === 0) {
+          notesApi.setActive(undefined);
+        } else {
+          const target = next[Math.min(idx, next.length - 1)];
+          notesApi.setActive(target);
+        }
+      }
+    },
+    [wsId, openIdsByWorkspace, notesApi],
+  );
+
+  const handleSelectChatTab = useCallback(() => {
+    notesApi.setActive(undefined);
+  }, [notesApi]);
+
+  const handleCreateNoteForDock = useCallback(async () => {
+    const note = await notesApi.createNote();
+    if (note) ensureOpen(note.id);
+    return note;
+  }, [notesApi, ensureOpen]);
+
+  const handleDetachNote = useCallback(
+    (note: NoteRecord) => {
+      const ws = workspacesApi.activeWorkspace;
+      if (!ws) return;
+      void window.helixApi.openNoteWindow(
+        ws.id,
+        ws.path,
+        note.path,
+        note.id,
+        note.title,
+      );
+      handleCloseNote(note.id);
+    },
+    [workspacesApi.activeWorkspace, handleCloseNote],
+  );
+
+  // Auto-open the active note as a tab when it's set from outside the dock
+  // (sidebar selection, restore from storage). Cheap — runs only when the
+  // active id flips.
+  useEffect(() => {
+    const id = notesApi.activeId;
+    if (id) ensureOpen(id);
+  }, [notesApi.activeId, ensureOpen]);
+
+  // The note editor takes over the main pane whenever a note is active and
+  // the workspace has a folder path (so we can save back to disk). Without
+  // a path, notes don't exist for this workspace at all.
+  const showNoteEditor =
+    !isSettings &&
+    hasWorkspacePath &&
+    !!notesApi.activeNote &&
+    !!workspacesApi.activeWorkspace;
+
+  const dockActiveId: "chat" | NoteId = notesApi.activeNote
+    ? notesApi.activeNote.id
+    : "chat";
+
+  const chatSubtitle =
+    sessionsApi.activeSession?.title ??
+    workspacesApi.activeWorkspace?.displayName ??
+    undefined;
+
   return (
     <div
       className="app-shell"
@@ -119,7 +284,7 @@ export function App() {
         onSelectWorkspace={workspacesApi.setActive}
         onAddWorkspace={openAddWorkspace}
         onRemoveWorkspace={workspacesApi.removeWorkspace}
-        canTogglePanel={!!workspacesApi.activeWorkspace?.path}
+        canTogglePanel={hasWorkspacePath}
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen((v) => !v)}
       />
@@ -127,8 +292,8 @@ export function App() {
         workspace={workspacesApi.activeWorkspace}
         sessions={sessionsApi.sessions}
         activeId={sessionsApi.activeId}
-        onSelect={sessionsApi.setActive}
-        onCreate={sessionsApi.createSession}
+        onSelect={handleSelectSession}
+        onCreate={handleCreateSession}
         onDelete={sessionsApi.deleteSession}
       />
       <main className="main-pane">
@@ -139,25 +304,30 @@ export function App() {
           </>
         ) : (
           <>
-            <Titlebar
-              title={
-                sessionsApi.activeSession?.title ??
-                workspacesApi.activeWorkspace?.displayName ??
-                "helix-ai"
-              }
-              subtitle={
-                sessionsApi.activeSession
-                  ? workspacesApi.activeWorkspace?.displayName
-                  : "no chat"
-              }
+            <MainDock
+              chatSubtitle={chatSubtitle}
+              openNotes={openNotes}
+              activeId={dockActiveId}
+              onSelectChat={handleSelectChatTab}
+              onSelectNote={handleOpenNote}
+              onCloseNote={handleCloseNote}
+              onDetachNote={handleDetachNote}
             />
-            <ChatView
-              activeWorkspace={workspacesApi.activeWorkspace}
-              activeSession={sessionsApi.activeSession}
-              setMessages={sessionsApi.setMessages}
-              setContextResetAt={sessionsApi.setContextResetAt}
-              createSession={sessionsApi.createSession}
-            />
+            {showNoteEditor && notesApi.activeNote && workspacesApi.activeWorkspace ? (
+              <NoteEditorContainer
+                workspace={workspacesApi.activeWorkspace}
+                note={notesApi.activeNote}
+                onRenamed={notesApi.setActive}
+              />
+            ) : (
+              <ChatView
+                activeWorkspace={workspacesApi.activeWorkspace}
+                activeSession={sessionsApi.activeSession}
+                setMessages={sessionsApi.setMessages}
+                setContextResetAt={sessionsApi.setContextResetAt}
+                createSession={sessionsApi.createSession}
+              />
+            )}
           </>
         )}
       </main>
@@ -165,6 +335,23 @@ export function App() {
         <WorkspacePanel
           workspace={workspacesApi.activeWorkspace}
           onClose={() => setPanelOpen(false)}
+          notes={notesApi.notes}
+          activeNoteId={notesApi.activeId}
+          notesLoading={notesApi.loading}
+          onSelectNote={handleOpenNote}
+          onCreateNote={handleCreateNoteForDock}
+          onDeleteNote={notesApi.deleteNote}
+          onOpenNoteWindow={(note) => {
+            const ws = workspacesApi.activeWorkspace;
+            if (!ws) return;
+            void window.helixApi.openNoteWindow(
+              ws.id,
+              ws.path,
+              note.path,
+              note.id,
+              note.title,
+            );
+          }}
         />
       ) : null}
       {isAddingWorkspace ? (

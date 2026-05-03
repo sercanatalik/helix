@@ -10,12 +10,14 @@ import { BlockNoteView } from "@blocknote/mantine";
 import { codeBlockOptions } from "@blocknote/code-block";
 import { inlineMathSpec } from "./inline-math";
 import { mathBlockSpec } from "./math-block";
+import { vegaBlockSpec } from "./vega-block";
 import {
   extractMathToText,
   injectMathBlocks,
   injectMathIntoBlocks,
   preProcessDisplayMath,
 } from "./inject-math";
+import { extractVegaToCodeBlocks, injectVegaBlocks } from "./inject-vega";
 import { useTheme } from "../../hooks/use-theme";
 import type { ThemeId } from "../../themes";
 import "@blocknote/core/fonts/inter.css";
@@ -58,6 +60,7 @@ export function BlockNoteEditor({
           ...defaultBlockSpecs,
           codeBlock: createCodeBlockSpec(codeBlockOptions),
           mathBlock: mathBlockSpec,
+          vegaBlock: vegaBlockSpec,
         },
         inlineContentSpecs: {
           ...defaultInlineContentSpecs,
@@ -97,9 +100,12 @@ export function BlockNoteEditor({
       const normalised = preProcessDisplayMath(initialMarkdown);
       const raw = editor.tryParseMarkdownToBlocks(normalised);
       const withInline = injectMathIntoBlocks(raw as unknown as unknown[]);
-      const withMath = injectMathBlocks(withInline) as typeof raw;
-      if (withMath.length > 0) {
-        editor.replaceBlocks(editor.document, withMath);
+      const withMath = injectMathBlocks(withInline);
+      // Lift any vega-lite / vega code blocks (and ```json blocks holding a
+      // Vega spec) into our `vegaBlock` so the chart renders inline.
+      const withVega = injectVegaBlocks(withMath) as typeof raw;
+      if (withVega.length > 0) {
+        editor.replaceBlocks(editor.document, withVega);
       }
     } catch {
       // Malformed markdown — surfacing a parse error here would only block
@@ -118,9 +124,14 @@ export function BlockNoteEditor({
   useEffect(() => {
     return editor.onChange(() => {
       try {
-        const flattened = extractMathToText(
+        // Vega blocks first → fenced code blocks; then math collapses back
+        // to `$$...$$` paragraphs. Order matters because `extractMathToText`
+        // also returns paragraph nodes the vega walker would skip anyway,
+        // but doing vega first avoids any future cross-talk.
+        const withoutVega = extractVegaToCodeBlocks(
           editor.document as unknown as unknown[],
         );
+        const flattened = extractMathToText(withoutVega);
         const md = editor.blocksToMarkdownLossy(
           flattened as unknown as typeof editor.document,
         );

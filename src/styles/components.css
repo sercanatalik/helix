@@ -2664,6 +2664,42 @@ button.mcp-tool-chip:disabled {
   margin: 0;
 }
 
+/* ---------- Vega chart (BlockNote custom block) --------------------- */
+/* `width: 100%` is load-bearing — BlockNote's prosemirror node-view
+ * wrapper has no width policy of its own, so without it our block (and
+ * the `width: "container"` Vega spec inside) measures zero and the chart
+ * canvas comes out empty. min-height keeps the panel visible while the
+ * lazy vega-embed chunk is fetching. */
+.bn-vega-block {
+  display: block;
+  width: 100%;
+  min-height: 280px;
+  padding: 12px 8px;
+  margin: 4px 0;
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent-raw);
+  user-select: none;
+  overflow-x: auto;
+  box-sizing: border-box;
+}
+/* The custom block's React render tree is mounted under
+ * `.bn-block-content[data-content-type="vegaBlock"]`. Force that wrapper
+ * to behave as a full-width block so our `.bn-vega-block` actually
+ * inherits the column width instead of shrinking to its content. */
+.bn-block-content[data-content-type="vegaBlock"] {
+  display: block;
+  width: 100%;
+}
+.bn-vega-block .vega-chart {
+  margin: 0;
+  border: none;
+  border-left: none;
+  background: transparent;
+  padding: 0;
+}
+
 /* ---------- Detached note window ------------------------------------ */
 .note-window {
   display: flex;

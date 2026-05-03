@@ -9,7 +9,6 @@ interface WorkspaceRailProps {
   readonly activeWorkspaceId: WorkspaceId | undefined;
   readonly onSelectWorkspace: (id: WorkspaceId) => void;
   readonly onAddWorkspace: () => void;
-  readonly onRemoveWorkspace: (id: WorkspaceId) => void;
   /** Whether the right-side files panel toggle is meaningful (i.e. the
    * active workspace has a folder attached). */
   readonly canTogglePanel: boolean;
@@ -26,7 +25,6 @@ export function WorkspaceRail({
   activeWorkspaceId,
   onSelectWorkspace,
   onAddWorkspace,
-  onRemoveWorkspace: _onRemoveWorkspace,
   canTogglePanel,
   panelOpen,
   onTogglePanel,

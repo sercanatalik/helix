@@ -45,10 +45,7 @@ const STATUS_LABELS: Readonly<Record<McpServerRuntime["status"], string>> = {
 };
 
 function configToInput(config: McpServerConfig): McpServerInput {
-  // Strip the id so the resulting object is suitable for `addMcpServer` and
-  // matches the shape `updateMcpServer` accepts.
   const { id: _id, ...rest } = config;
-  void _id;
   return rest;
 }
 

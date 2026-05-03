@@ -16,7 +16,6 @@ export interface UseWorkspacesResult {
   readonly activeWorkspace: WorkspaceRecord | undefined;
   readonly setActive: (id: WorkspaceId) => void;
   readonly addWorkspace: (displayName: string, path?: string) => WorkspaceId;
-  readonly removeWorkspace: (id: WorkspaceId) => void;
 }
 
 function nowIso(): string {
@@ -76,17 +75,11 @@ export function useWorkspaces(): UseWorkspacesResult {
     [],
   );
 
-  const removeWorkspace = useCallback((id: WorkspaceId) => {
-    setWorkspaces((curr) => curr.filter((w) => w.id !== id));
-    setActiveId((curr) => (curr === id ? undefined : curr));
-  }, []);
-
   return {
     workspaces,
     activeId: activeWorkspace?.id,
     activeWorkspace,
     setActive,
     addWorkspace,
-    removeWorkspace,
   };
 }

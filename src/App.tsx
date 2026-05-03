@@ -330,7 +330,6 @@ export function App() {
         activeWorkspaceId={workspacesApi.activeId}
         onSelectWorkspace={workspacesApi.setActive}
         onAddWorkspace={openAddWorkspace}
-        onRemoveWorkspace={workspacesApi.removeWorkspace}
         canTogglePanel={hasWorkspacePath}
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen((v) => !v)}

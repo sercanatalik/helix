@@ -319,18 +319,15 @@ function buildConfig(tokens: ThemeTokens): VegaLikeConfig {
   };
 }
 
-export function VegaChart({ code, language, isIncomplete }: VegaChartProps) {
+export function VegaChart({ code, language }: VegaChartProps) {
   const tokens = useThemeTokens();
   const parsed = useMemo(() => parseSpec(code, language), [code, language]);
   const config = useMemo(() => (tokens ? buildConfig(tokens) : undefined), [tokens]);
 
-  // Pending only when our own parse failed AND the JSON skeleton isn't
-  // closed yet. We deliberately ignore streamdown's `isIncomplete` here:
-  // when content is patched in atomically (tool-result harvest, replayed
-  // sessions) it can lie about a complete block, and we don't want a valid
-  // spec stuck behind a stale flag. Once the brace/bracket balance is good
-  // the fast/repair JSON.parse path will succeed and we'll render.
-  void isIncomplete;
+  // We deliberately ignore streamdown's `isIncomplete` flag (see VegaChartProps).
+  // When tool-result content is patched in atomically (replayed sessions, harvest
+  // from a tool call), the flag can lie. Brace/bracket balance from our own
+  // parse is the source of truth.
   if (!parsed.ok && parsed.pending) {
     return (
       <div className="vega-chart vega-chart--pending" role="status">

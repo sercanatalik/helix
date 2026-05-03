@@ -502,7 +502,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     // while we round-trip to MCP for prompt content.
     const userText = text;
     setText("");
-    const oneShotContext = pendingContext.map((p) => p.content);
+    const attachments = pendingContext;
+    const oneShotContext = attachments.map((p) => p.content);
     setPendingContext([]);
 
     const promptContext = await fetchEnabledPromptContext();
@@ -511,6 +512,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       skills,
       renderSkill,
       discoverableSkills,
+      attachments,
     );
     const workspaceContext = buildWorkspaceContext(workspacePath);
 

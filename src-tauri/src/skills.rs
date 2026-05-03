@@ -138,6 +138,7 @@ fn load_skill_file(path: &Path, dir_name: &str, source: SkillSource) -> Result<S
 
 fn skill_id(source: SkillSource, dir_name: &str) -> String {
     let prefix = match source {
+        SkillSource::Builtin => "builtin",
         SkillSource::User => "user",
         SkillSource::Project => "project",
     };
@@ -147,7 +148,7 @@ fn skill_id(source: SkillSource, dir_name: &str) -> String {
 /// Split `raw` into `(frontmatter, body)`. Frontmatter must start at the
 /// very first byte of the file (optionally after a UTF-8 BOM) and is fenced
 /// by `---` lines, matching Claude's spec.
-fn split_frontmatter(raw: &str) -> (Option<&str>, String) {
+pub fn split_frontmatter(raw: &str) -> (Option<&str>, String) {
     let stripped = raw.strip_prefix('\u{feff}').unwrap_or(raw);
     let trimmed_start = stripped.trim_start_matches(['\n', '\r']);
     let opens_with_dashes = trimmed_start.starts_with("---");
@@ -214,7 +215,7 @@ fn split_frontmatter(raw: &str) -> (Option<&str>, String) {
 ///
 /// Anything more exotic returns an error so the user sees a clear "couldn't
 /// parse frontmatter" hint rather than silent misbehaviour.
-fn parse_frontmatter(text: &str) -> Result<SkillFrontmatter, String> {
+pub fn parse_frontmatter(text: &str) -> Result<SkillFrontmatter, String> {
     let mut fm = SkillFrontmatter::default();
     let lines: Vec<&str> = text.lines().collect();
     let mut i = 0;
@@ -345,7 +346,7 @@ fn apply_list_field(fm: &mut SkillFrontmatter, key: &str, items: Vec<String>) {
     }
 }
 
-fn first_paragraph(body: &str) -> Option<String> {
+pub fn first_paragraph(body: &str) -> Option<String> {
     let trimmed = body.trim_start();
     if trimmed.is_empty() {
         return None;
@@ -592,9 +593,11 @@ impl SkillsManager {
     }
 }
 
-/// Merge user + project scans. Project wins on directory-name collision —
-/// the user copy is dropped entirely so the UI doesn't render duplicates.
+/// Merge built-in + user + project scans. Precedence on name collision is
+/// project > user > builtin: the lower-tier copy is dropped entirely so the
+/// UI doesn't render duplicates.
 pub fn scan_all(workspace: Option<&Path>) -> Vec<Skill> {
+    let mut builtin_skills = crate::builtin_skills::load();
     let mut user_skills = match user_skills_root() {
         Some(root) => scan_root(&root, SkillSource::User),
         None => Vec::new(),
@@ -610,9 +613,18 @@ pub fn scan_all(workspace: Option<&Path>) -> Vec<Skill> {
             .map(|s| s.name.as_str())
             .collect();
         user_skills.retain(|s| !project_names.contains(s.name.as_str()));
+        builtin_skills.retain(|s| !project_names.contains(s.name.as_str()));
+    }
+    if !user_skills.is_empty() {
+        let user_names: std::collections::HashSet<&str> =
+            user_skills.iter().map(|s| s.name.as_str()).collect();
+        builtin_skills.retain(|s| !user_names.contains(s.name.as_str()));
     }
 
-    let mut out = Vec::with_capacity(user_skills.len() + project_skills.len());
+    let mut out = Vec::with_capacity(
+        builtin_skills.len() + user_skills.len() + project_skills.len(),
+    );
+    out.extend(builtin_skills);
     out.extend(user_skills);
     out.extend(project_skills);
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));

@@ -1,6 +1,7 @@
 import { Kbd } from "../../../components/ui";
 import type { Skill } from "../../../app/types";
 import type { BuiltinSlashCommand } from "../../../lib/builtin-tools";
+import type { PendingContextEntry } from "./pending-context";
 
 /** Union of items that can appear in the slash popover. Skills come
  * from disk and ride a separate render pipeline; built-in commands
@@ -94,6 +95,7 @@ export async function buildSkillContext(
   skills: readonly Skill[],
   render: (id: string, args: string) => Promise<string>,
   discoverable: readonly Skill[],
+  pendingContext: readonly PendingContextEntry[] = [],
 ): Promise<string[]> {
   const out: string[] = [];
 
@@ -119,11 +121,29 @@ export async function buildSkillContext(
   if (invocation) {
     try {
       const body = await render(invocation.skill.id, invocation.args);
+      // List pending workspace files so the model treats them as the
+      // skill's source material instead of unrelated background context.
+      // Without this hint a slash invocation reads as bare metadata —
+      // the model has no signal that "the user attached foo.md and
+      // wants this skill applied to it".
+      const attachedFiles = pendingContext.filter((p) => p.kind === "file");
+      const attachmentLines =
+        attachedFiles.length > 0
+          ? [
+              "",
+              "Attached workspace files (already loaded into context above):",
+              ...attachedFiles.map((f) => `- ${f.label}`),
+              "Treat these as the source material for this skill where",
+              "applicable. Do not ask the user to provide content that's",
+              "already attached.",
+            ]
+          : [];
       out.push(
         [
           `[helix skills · invoked: ${invocation.skill.name}]`,
           "The user explicitly invoked this skill. Follow its instructions",
           "verbatim for this turn.",
+          ...attachmentLines,
           "",
           body,
         ].join("\n"),
@@ -203,7 +223,9 @@ export function SkillsSlashMenu({
             item.kind === "skill"
               ? item.skill.source === "project"
                 ? "project"
-                : "user"
+                : item.skill.source === "builtin"
+                  ? "built-in"
+                  : "user"
               : "built-in";
           return (
             <li

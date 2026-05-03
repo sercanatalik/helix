@@ -265,6 +265,10 @@ pub struct McpResourceResult {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SkillSource {
+    /// Embedded in the helix binary at compile time. Always available, no
+    /// filesystem dependency. Lowest precedence: a same-named user or
+    /// project skill overrides it.
+    Builtin,
     /// Loaded from `~/.claude/skills/`. Available across all workspaces.
     User,
     /// Loaded from `<workspace>/.claude/skills/`. Project-scoped; takes

@@ -35,35 +35,24 @@ export function SkillsPane() {
         </Button>
       </div>
       <p className="settings-section-desc">
-        Skills extend helix with reusable instructions, mirroring Claude
-        Desktop and Claude Code. Drop a folder under{" "}
-        <code>~/.claude/skills/&lt;name&gt;/</code> with a{" "}
-        <code>SKILL.md</code> file and it shows up here automatically. Project
-        skills under <code>&lt;workspace&gt;/.claude/skills/</code> override
-        same-named user skills. Type <code>/</code> in the composer to invoke
-        one.
+        Reusable instructions invoked via <code>/</code> in the composer.
+        Project &gt; user &gt; built-in on name collision.
       </p>
 
       {skills.length === 0 ? (
         <p className="providers-empty">
-          No skills found. Create one under <code>~/.claude/skills/</code> or
-          your workspace's <code>.claude/skills/</code> to get started.
+          No skills found. Add one under <code>~/.claude/skills/</code>.
         </p>
       ) : null}
 
       {grouped.project.length > 0 ? (
-        <SkillsGroup
-          label="Project"
-          hint="Loaded from the active workspace's .claude/skills directory."
-          skills={grouped.project}
-        />
+        <SkillsGroup label="Project" skills={grouped.project} />
       ) : null}
       {grouped.user.length > 0 ? (
-        <SkillsGroup
-          label="User"
-          hint="Loaded from ~/.claude/skills, available across every workspace."
-          skills={grouped.user}
-        />
+        <SkillsGroup label="User" skills={grouped.user} />
+      ) : null}
+      {grouped.builtin.length > 0 ? (
+        <SkillsGroup label="Built-in" skills={grouped.builtin} />
       ) : null}
     </section>
   );
@@ -72,31 +61,31 @@ export function SkillsPane() {
 interface GroupedSkills {
   readonly project: readonly Skill[];
   readonly user: readonly Skill[];
+  readonly builtin: readonly Skill[];
 }
 
 function groupSkills(skills: readonly Skill[]): GroupedSkills {
   const project: Skill[] = [];
   const user: Skill[] = [];
+  const builtin: Skill[] = [];
   for (const s of skills) {
     if (s.source === "project") project.push(s);
+    else if (s.source === "builtin") builtin.push(s);
     else user.push(s);
   }
-  return { project, user };
+  return { project, user, builtin };
 }
 
 function SkillsGroup({
   label,
-  hint,
   skills,
 }: {
   readonly label: string;
-  readonly hint: string;
   readonly skills: readonly Skill[];
 }) {
   return (
     <>
       <div className="providers-section-label">{label}</div>
-      <p className="providers-section-hint">{hint}</p>
       <ul className="providers-list">
         {skills.map((skill) => (
           <SkillRow key={skill.id} skill={skill} />
@@ -144,9 +133,11 @@ function SkillRow({ skill }: { readonly skill: Skill }) {
         {expanded ? (
           <div className="skill-row-detail">
             <dl className="skill-detail-list">
-              <DetailRow label="Path">
-                <code>{skill.skillMdPath}</code>
-              </DetailRow>
+              {skill.source !== "builtin" ? (
+                <DetailRow label="Path">
+                  <code>{skill.skillMdPath}</code>
+                </DetailRow>
+              ) : null}
               {skill.whenToUse ? (
                 <DetailRow label="When to use">{skill.whenToUse}</DetailRow>
               ) : null}

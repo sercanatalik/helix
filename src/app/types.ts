@@ -197,13 +197,15 @@ export interface SessionRecord {
 export type SessionKey = `${WorkspaceId}::${SessionId}`;
 
 /** Where a skill came from. Mirrors Claude Code's precedence model: project
- * skills override personal ones with the same directory name. */
-export type SkillSource = "user" | "project";
+ * overrides user, both override built-in. `builtin` skills ship inside the
+ * helix binary — no filesystem dependency. */
+export type SkillSource = "builtin" | "user" | "project";
 
-/** A skill discovered on disk under either `~/.claude/skills/<name>/SKILL.md`
- * or `<workspace>/.claude/skills/<name>/SKILL.md`. The wire shape mirrors
- * Claude Code's frontmatter fields plus a few helix-specific fields used for
- * UI state (`id`, `source`, `error`). */
+/** A skill — either embedded in the helix binary (`builtin`) or discovered on
+ * disk under `~/.claude/skills/<name>/SKILL.md` (`user`) or
+ * `<workspace>/.claude/skills/<name>/SKILL.md` (`project`). The wire shape
+ * mirrors Claude Code's frontmatter fields plus a few helix-specific fields
+ * used for UI state (`id`, `source`, `error`). */
 export interface Skill {
   readonly id: string;
   readonly name: string;

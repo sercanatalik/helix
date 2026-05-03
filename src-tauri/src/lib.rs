@@ -1,3 +1,4 @@
+mod builtin_skills;
 mod commands;
 mod data_tools;
 mod mcp;

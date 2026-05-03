@@ -761,6 +761,9 @@ button.mcp-tool-chip:disabled {
   margin: 0;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .mcp-menu-item {
   border-radius: 6px;

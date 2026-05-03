@@ -320,7 +320,10 @@
 .dock-tab-label {
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
+  /* Reserve at least 8 characters of label before ellipsizing — short
+   * names like "ideas.md" stay fully visible, long ones still cap at the
+   * tab's 220px max-width. */
+  min-width: 8ch;
 }
 .dock-tab-subtle {
   font-family: var(--font-mono);

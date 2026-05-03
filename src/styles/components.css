@@ -2036,6 +2036,99 @@ button.mcp-tool-chip:disabled {
   text-decoration: var(--shiki-dark-text-decoration) !important;
 }
 
+/* ---------- Markdown tables ----------
+ * Themed to match the rest of the app: hairline borders on the
+ * `--border-subtle` token, header strip lifted onto `--bg-elev`, accent
+ * underline below the header, and a subtle hover row tint pulled from
+ * `--accent-raw` so the visual language stays consistent with chips,
+ * code blocks, and chart artifacts. `display: block` lets a wide table
+ * scroll horizontally inside the chat column without bleeding past the
+ * transcript width. */
+.streamdown-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 14px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--bg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  font-family: var(--font-sans);
+  /* Quiet the native scrollbar so it doesn't compete with the chrome. */
+  scrollbar-width: thin;
+}
+.streamdown-content table thead {
+  background: var(--bg-elev);
+}
+.streamdown-content table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--fg);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-raw);
+  white-space: nowrap;
+  letter-spacing: -0.005em;
+}
+.streamdown-content table thead tr:last-child th {
+  /* Subtle accent rule under the header to echo the code-block left
+   * border treatment without shouting. */
+  box-shadow: inset 0 -1px 0 0
+    color-mix(in oklab, var(--accent-raw) 35%, transparent);
+}
+.streamdown-content table td {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--fg);
+  vertical-align: top;
+}
+.streamdown-content table tbody tr:first-child td {
+  border-top: none;
+}
+.streamdown-content table tbody tr:nth-child(even) td {
+  /* Light zebra so dense numeric rows are easy to track left-to-right
+   * without adding noise. Tinted toward `--bg-elev` so the contrast
+   * matches the header strip in feel. */
+  background: color-mix(in oklab, var(--bg-elev) 55%, transparent);
+}
+.streamdown-content table tbody tr:hover td {
+  background: color-mix(in oklab, var(--accent-raw) 7%, var(--bg-elev));
+}
+.streamdown-content table th:first-child,
+.streamdown-content table td:first-child {
+  padding-left: 14px;
+}
+.streamdown-content table th:last-child,
+.streamdown-content table td:last-child {
+  padding-right: 14px;
+}
+/* Numbers: tabular figures so columns of currency / percentages line up
+ * by digit place instead of by glyph width. */
+.streamdown-content table td {
+  font-variant-numeric: tabular-nums;
+}
+/* Inline code inside a cell: drop the chip border so the cell stays
+ * readable — the cell background already provides the panel cue. */
+.streamdown-content table :not(pre) > code {
+  border: none;
+  background: color-mix(in oklab, var(--accent-raw) 8%, transparent);
+  padding: 0.05rem 0.25rem;
+}
+/* Hide streamdown's table fullscreen toggle. We render in a desktop chat
+ * column where horizontal scroll already covers wide tables, and the icon
+ * sits over the first cell which obscures content. The streamdown button
+ * is plain `<button title="View fullscreen">` (no aria-label, no stable
+ * className), so we match on the title attribute and the data-streamdown
+ * value used by the fullscreen overlay. */
+.streamdown-content button[title*="fullscreen" i],
+.streamdown-content button[title*="full screen" i],
+.streamdown-content [data-streamdown="table-fullscreen"],
+.streamdown-content [data-streamdown*="fullscreen" i] {
+  display: none !important;
+}
+
 /* ---------- Vega chart artifact ----------
  * Rendered for ```vega-lite / ```vega fenced blocks via the Streamdown
  * custom renderer (see lib/markdown/plugins.ts). Mark/axis/legend colors
@@ -2554,7 +2647,9 @@ button.mcp-tool-chip:disabled {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
+  /* Hold at least 8 characters of the title before falling to ellipsis,
+   * so even tightly-packed sidebars don't cut titles to 2-3 letters. */
+  min-width: 8ch;
 }
 .note-row-meta {
   font-family: var(--font-mono);
@@ -2864,3 +2959,4 @@ button.mcp-tool-chip:disabled {
   border-right: 1px solid var(--border-subtle);
   color: var(--fg-faint);
 }
+

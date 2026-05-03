@@ -92,6 +92,11 @@ export const BUILTIN_SLASH_COMMANDS: readonly BuiltinSlashCommand[] = [
     description:
       "Clear the visible chat transcript and reset the model's context. The conversation starts fresh.",
   },
+  {
+    name: "write-to-workspace",
+    description:
+      "Save the assistant responses as a markdown file in the active workspace folder with short summaries. Tables, code fences, and chart specs are preserved verbatim; only a short header (title + timestamp) is prepended.",
+  },
 ];
 
 /** Subgroups inside the Helix Core popover — mirror the MCP popover's

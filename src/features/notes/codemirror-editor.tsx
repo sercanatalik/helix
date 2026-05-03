@@ -3,7 +3,12 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput } from "@codemirror/language";
+import {
+  syntaxHighlighting,
+  defaultHighlightStyle,
+  bracketMatching,
+  indentOnInput,
+} from "@codemirror/language";
 
 interface CodeMirrorEditorProps {
   /** Initial document content. Re-applied only when the underlying note id
@@ -17,7 +22,12 @@ interface CodeMirrorEditorProps {
 
 /** Hand-rolled CodeMirror 6 React wrapper. We avoid `@uiw/react-codemirror`
  * to stay in control of the lifecycle (single mount per note id, no
- * re-render thrash) and keep the dependency surface small. */
+ * re-render thrash) and keep the dependency surface small.
+ *
+ * Raw mode is intentionally a plain CodeMirror surface — no widgets, no
+ * custom highlight style, no font remapping. The user sees the literal
+ * markdown source as authored, in CodeMirror's default theme. Rich mode
+ * (BlockNote) is the place for rendered prose / charts / images. */
 export function CodeMirrorEditor({ initialDoc, onChange }: CodeMirrorEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   // Latest onChange in a ref so the EditorView callback never holds a stale
@@ -44,23 +54,6 @@ export function CodeMirrorEditor({ initialDoc, onChange }: CodeMirrorEditorProps
           if (update.docChanged) {
             onChangeRef.current(update.state.doc.toString());
           }
-        }),
-        // Match the chat transcript's streamdown body: same 14px / 1.62
-        // rhythm and the app's --font-mono token so a markdown file in the
-        // raw editor reads at the same scale as the rendered chat output.
-        EditorView.theme({
-          "&": {
-            height: "100%",
-            fontSize: "14px",
-            color: "var(--fg)",
-          },
-          ".cm-scroller": {
-            fontFamily: "var(--font-mono)",
-            lineHeight: "1.62",
-          },
-          ".cm-content": {
-            padding: "16px 4px",
-          },
         }),
       ],
     });

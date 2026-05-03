@@ -113,6 +113,16 @@ export function Composer({
   const [open, setOpen] = useState<boolean>(false);
   const [builtinOpen, setBuiltinOpen] = useState<boolean>(false);
   const [modelMenuOpen, setModelMenuOpen] = useState<boolean>(false);
+  // One-shot status line for built-in slash commands that write to disk
+  // (`/write-to-workspace`). Self-clears after a few seconds so the
+  // composer doesn't hold onto stale messages. Distinct from `hint` —
+  // `hint` is provider/error driven and owned by the parent.
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!notice) return;
+    const handle = window.setTimeout(() => setNotice(undefined), 4000);
+    return () => window.clearTimeout(handle);
+  }, [notice]);
   const activeModel = selectedModel || provider?.model;
   const modelsApi = useModels(provider);
   // Per-item invocation state — `${serverId}::${name|uri}` → "running" or
@@ -423,10 +433,25 @@ export function Composer({
     // Checked before `canSend` so the user can clear even when no
     // provider / model is configured. Trailing whitespace is tolerated
     // so ⌫-then-↵ on a stray space still works.
-    if (text.trim().toLowerCase() === "/clear") {
+    const trimmed = text.trim().toLowerCase();
+    if (trimmed === "/clear") {
       setText("");
       setPendingContext([]);
       onClearTranscript?.();
+      return;
+    }
+    // `/write-to-workspace` saves the most recent assistant response as a
+    // markdown file in the workspace folder. Like `/clear`, it never
+    // round-trips to the model — purely a client-side affordance. Tables,
+    // code fences, and chart specs in the response are already markdown,
+    // so the file content is `<short header>\n\n<message body>`.
+    if (trimmed === "/write-to-workspace") {
+      setText("");
+      await writeLatestAssistantToWorkspace(
+        messages,
+        workspacePath,
+        setNotice,
+      );
       return;
     }
     if (!canSend) return;
@@ -532,7 +557,9 @@ export function Composer({
   return (
     <div className="composer-wrap">
       <div className="composer-inner">
-        {hint ? <div className="composer-status">{hint}</div> : null}
+        {notice || hint ? (
+          <div className="composer-status">{notice ?? hint}</div>
+        ) : null}
         <div className="composer-tools">
           <ToolChip
             buttonRef={builtinTriggerRef}
@@ -688,6 +715,56 @@ export function Composer({
       </div>
     </div>
   );
+}
+
+/** Write the most recent assistant message to the workspace as a markdown
+ * file. Surfaces success / failure / no-op states through the supplied
+ * `setNotice` callback so the composer can show a transient inline status.
+ * The file body is the assistant's content verbatim — already markdown, so
+ * tables / code fences / vega-lite blocks survive the round-trip — preceded
+ * by a single-line header (title + timestamp). */
+async function writeLatestAssistantToWorkspace(
+  messages: readonly TranscriptMessage[] | undefined,
+  workspacePath: string | undefined,
+  setNotice: (text: string | undefined) => void,
+): Promise<void> {
+  if (!workspacePath) {
+    setNotice("/write-to-workspace: attach a workspace folder first.");
+    return;
+  }
+  const list = messages ?? [];
+  let last: TranscriptMessage | undefined;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (m && m.role === "assistant" && m.content.trim().length > 0) {
+      last = m;
+      break;
+    }
+  }
+  if (!last) {
+    setNotice("/write-to-workspace: no assistant response to save yet.");
+    return;
+  }
+
+  const ts = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+  const fileName = `chat-export-${stamp}.md`;
+  const sep = /[\\/]$/.test(workspacePath) ? "" : "/";
+  const path = `${workspacePath}${sep}${fileName}`;
+  const header = `# Chat export — ${ts.toLocaleString()}\n\n`;
+  const content = `${header}${last.content}\n`;
+
+  try {
+    const result = await window.helixApi.writeFile(path, content);
+    setNotice(`Saved to ${result.path}`);
+  } catch (err) {
+    setNotice(
+      `/write-to-workspace failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
 }
 
 /** When the active workspace has an attached folder, tell the model about

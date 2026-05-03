@@ -23,12 +23,6 @@ export const vegaBlockSpec = createReactBlockSpec(
       const props = block.props as { spec?: string; language?: string };
       const spec = props.spec ?? "";
       const language = props.language ?? "vega-lite";
-      // One-line trace per mount so we can confirm BlockNote actually
-      // renders our custom block (vs. silently dropping it from the schema).
-      // eslint-disable-next-line no-console
-      console.log(
-        `[vega-block] render lang=${language} spec.len=${spec.length}`,
-      );
       return (
         <div className="bn-vega-block" contentEditable={false}>
           <VegaChart code={spec} language={language} isIncomplete={false} />

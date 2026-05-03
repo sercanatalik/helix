@@ -4,6 +4,7 @@ import { McpPane } from "./mcp-pane";
 import { SkillsPane } from "./skills-pane";
 import { AppearancePane } from "./appearance";
 import { GeneralPane } from "./general";
+import { ProxyPane } from "./proxy-pane";
 
 interface SettingsPane {
   readonly id: string;
@@ -18,6 +19,7 @@ const PANES: readonly SettingsPane[] = [
   { id: "providers", label: "Providers", Component: ProvidersPane },
   { id: "mcp", label: "MCP", Component: McpPane },
   { id: "skills", label: "Skills", Component: SkillsPane },
+  { id: "proxy", label: "Proxy", Component: ProxyPane },
   { id: "general", label: "General", Component: GeneralPane },
 ];
 

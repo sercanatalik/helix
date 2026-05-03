@@ -408,6 +408,31 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
       required: ["query"],
     },
   },
+  {
+    name: "web_fetch",
+    label: "Web Fetch",
+    group: "web",
+    description:
+      "Fetch a single URL and return the body as readable text. HTML is reduced to plain text — script/style/comment blocks are dropped, block-level tags become line breaks, remaining tags are stripped. text/* and application/json bodies pass through verbatim. Output is capped at 200 KB by default (hard ceiling 500 KB) so a single page can't dominate the model's context. Routed through the corporate proxy when one is configured in Settings → Proxy. Use this after web_search to read a specific result, or when the user pastes a URL they want summarised. Non-2xx responses (anti-bot pages, consent walls, anti-scraper 500s) come back with the body so you can read what the server said and pivot to a different source — Yahoo Finance, Bloomberg, and similar SPA-heavy sites typically return HTTP 500 to non-browser clients, so prefer purpose-built JSON endpoints (e.g. api.frankfurter.dev for FX) when available.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description:
+            "Absolute http:// or https:// URL to fetch. Redirects are followed (up to 10).",
+        },
+        max_bytes: {
+          type: "integer",
+          minimum: 1024,
+          maximum: 500000,
+          description:
+            "Cap on bytes of body text returned. Default 200000. Increase if a `truncated: true` response cut off mid-page.",
+        },
+      },
+      required: ["url"],
+    },
+  },
 ];
 
 const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set(

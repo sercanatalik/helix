@@ -6,6 +6,7 @@ mod notes;
 mod skills;
 mod tools;
 mod types;
+mod web_fetch;
 mod web_search;
 
 use commands::{SharedMcp, SharedSkills, SharedState, WatcherState};
@@ -209,6 +210,7 @@ pub fn run() {
             data_tools::read_excel,
             data_tools::analyse_data,
             web_search::web_search,
+            web_fetch::web_fetch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

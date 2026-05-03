@@ -289,6 +289,37 @@ export interface WebSearchResponse {
   readonly parseWarning?: string;
 }
 
+// -- Internet fetch -----------------------------------------------------
+//
+// GET a single URL through the same proxy plumbing as `web_search`. HTML
+// is reduced to readable text (script/style blocks dropped, block tags →
+// newlines, remaining tags stripped); other text/json types pass through
+// verbatim. Output is byte-capped so a single page can't dominate the
+// model's context window.
+
+export interface WebFetchArgs {
+  readonly url: string;
+  /** Cap on output bytes. Defaults to 200 KB; hard ceiling 500 KB. */
+  readonly maxBytes?: number;
+  /** Forwarded verbatim from `useProxy()` — `undefined` means no proxy.
+   * Same shape the dispatcher snapshots for `webSearch`. */
+  readonly proxy?: WebSearchProxy;
+}
+
+export interface WebFetchResponse {
+  readonly url: string;
+  /** URL after following redirects. Equal to `url` when no redirect fired. */
+  readonly finalUrl: string;
+  readonly status: number;
+  /** Lower-cased Content-Type header (or empty when the server omitted it). */
+  readonly contentType: string;
+  readonly text: string;
+  /** True when `text` was clipped at `maxBytes`. */
+  readonly truncated: boolean;
+  /** Length of `text` in bytes (post-truncation). */
+  readonly byteCount: number;
+}
+
 export const builtinToolsApi = {
   /** Read a file. Text files come back as a `cat -n`-style numbered slice
    * (default 2000 lines from the top); images/PDFs come back as a base64
@@ -393,4 +424,12 @@ export const builtinToolsApi = {
    * change applies to the next search without a process restart. */
   webSearch: (args: WebSearchArgs): Promise<WebSearchResponse> =>
     invoke<WebSearchResponse>("web_search", { args }),
+
+  /** Fetch a single URL and return the body as readable text. HTML is
+   * reduced to plain text (script/style blocks dropped, block tags →
+   * newlines, remaining tags stripped); other text/json types pass through
+   * verbatim. Routed through the corporate proxy when one is configured —
+   * same per-call snapshot pattern as {@link webSearch}. */
+  webFetch: (args: WebFetchArgs): Promise<WebFetchResponse> =>
+    invoke<WebFetchResponse>("web_fetch", { args }),
 };

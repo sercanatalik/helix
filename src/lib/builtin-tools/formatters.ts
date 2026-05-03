@@ -5,6 +5,7 @@ import type {
   GrepResult,
   ReadExcelResult,
   SearchFilesResult,
+  WebFetchResponse,
   WebSearchResponse,
 } from "../api/builtin-tools";
 
@@ -109,4 +110,32 @@ export function formatWebSearchResult(r: WebSearchResponse): string {
     .join("\n\n");
   const warn = r.parseWarning ? `\n\n[note] ${r.parseWarning}` : "";
   return `${head}\n\n${body}${warn}`;
+}
+
+/** Render a fetched page as a header block followed by the extracted body.
+ * The header carries the metadata the model needs to cite (final URL after
+ * redirects, status, content type) and a truncation flag so the agent can
+ * decide whether to re-fetch with a larger `max_bytes`. Non-2xx statuses
+ * get a `[non-2xx response]` banner so the model treats the body as an
+ * error page (consent wall, anti-bot screen, "moved", etc.) rather than
+ * the canonical content. */
+export function formatWebFetchResult(r: WebFetchResponse): string {
+  const redirected = r.finalUrl && r.finalUrl !== r.url;
+  const isError = r.status < 200 || r.status >= 300;
+  const headLines = [
+    isError
+      ? `[non-2xx response — body below is what the server returned, likely an error page or consent wall]`
+      : null,
+    `URL: ${r.url}`,
+    redirected ? `Final URL: ${r.finalUrl}` : null,
+    `HTTP ${r.status} · ${r.contentType || "unknown content-type"} · ${r.byteCount} bytes${r.truncated ? " · truncated" : ""}`,
+  ].filter(Boolean);
+  const head = headLines.join("\n");
+  if (!r.text) {
+    return `${head}\n\n(empty body)`;
+  }
+  const tail = r.truncated
+    ? `\n\n[truncated at ${r.byteCount} bytes — call again with a larger max_bytes to see more]`
+    : "";
+  return `${head}\n\n${r.text}${tail}`;
 }

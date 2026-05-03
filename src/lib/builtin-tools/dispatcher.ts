@@ -4,6 +4,7 @@ import {
   formatDataResult,
   formatGrepResult,
   formatSearchFilesResult,
+  formatWebFetchResult,
   formatWebSearchResult,
 } from "./formatters";
 
@@ -328,6 +329,24 @@ export async function runBuiltinTool(
           proxy: proxy && proxy.enabled && proxy.host ? proxy : undefined,
         });
         return { result: formatWebSearchResult(r), isError: false };
+      }
+      case "web_fetch": {
+        const { url, max_bytes } = args as {
+          url?: string;
+          max_bytes?: number;
+        };
+        if (typeof url !== "string" || !url.trim()) {
+          return { result: "web_fetch: missing `url`", isError: true };
+        }
+        // Same proxy snapshot pattern as web_search — read at call time so
+        // a Settings change applies to the next fetch without a restart.
+        const proxy = uiHandlers.proxyConfig;
+        const r = await window.helixApi.webFetch({
+          url: url.trim(),
+          maxBytes: typeof max_bytes === "number" ? max_bytes : undefined,
+          proxy: proxy && proxy.enabled && proxy.host ? proxy : undefined,
+        });
+        return { result: formatWebFetchResult(r), isError: false };
       }
       default:
         return {

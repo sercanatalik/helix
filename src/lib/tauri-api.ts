@@ -52,6 +52,8 @@ export type {
   SearchCountMatch,
   SearchFilesArgs,
   SearchFilesResult,
+  WebFetchArgs,
+  WebFetchResponse,
   WebSearchArgs,
   WebSearchHit,
   WebSearchProxy,

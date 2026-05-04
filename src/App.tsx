@@ -10,7 +10,7 @@ import {
 } from "react";
 import { AddWorkspaceDialog } from "./app/add-workspace-dialog";
 import { MainDock } from "./app/main-dock";
-import { WorkspacePanel } from "./app/workspace-panel";
+import { WorkspacePanel, type AttachFileResult } from "./app/workspace-panel";
 import { WorkspaceRail } from "./app/workspace-rail";
 import { Sidebar } from "./app/sidebar";
 import { Titlebar } from "./app/titlebar";
@@ -275,31 +275,73 @@ export function App() {
 
   // Workspace panel → composer. Click a file row in the right sidebar and
   // its content rides along on the next message as hidden system context,
-  // attributed to the `read_file` built-in tool. Binary kinds are skipped
-  // for now — images / PDFs need a different routing (multimodal content
-  // blocks vs. plain text), so silently no-op rather than dump a base64
-  // blob into the prompt.
+  // attributed to the `read_file` built-in tool. PDFs flow through
+  // `read_pdf` so the extracted text body still lands in context;
+  // images and other binary formats are skipped with an explicit reason
+  // so the panel can surface a notice. Returns a result object so the
+  // panel can flash an "attached" / "skipped" message next to the row.
   const handleAttachFileToContext = useCallback(
-    async (entry: TreeEntry) => {
-      if (entry.kind !== "file") return;
+    async (entry: TreeEntry): Promise<AttachFileResult> => {
+      if (entry.kind !== "file") return { ok: false, message: "Not a file." };
       const composer = composerRef.current;
-      if (!composer) return;
+      if (!composer) {
+        return {
+          ok: false,
+          message: "Open a chat first — context attaches to the active session.",
+        };
+      }
       const ws = workspacesApi.activeWorkspace;
+      const relPath =
+        ws?.path && entry.path.startsWith(ws.path)
+          ? entry.path.slice(ws.path.length).replace(/^[\\/]+/, "")
+          : entry.name;
       try {
         const result = await window.helixApi.readFile(entry.path);
-        if (result.kind !== "text" && result.kind !== "notebook") return;
-        const relPath =
-          ws?.path && entry.path.startsWith(ws.path)
-            ? entry.path.slice(ws.path.length).replace(/^[\\/]+/, "")
-            : entry.name;
-        composer.attachWorkspaceFile({
-          absPath: entry.path,
-          relPath,
-          content: result.content,
-        });
-      } catch {
-        // Read failure is non-fatal — the panel already shows the file as
-        // present, and the user will retry or pick a different one.
+        if (result.kind === "text" || result.kind === "notebook") {
+          composer.attachWorkspaceFile({
+            absPath: entry.path,
+            relPath,
+            content: result.content,
+          });
+          return { ok: true, message: `Attached ${relPath}` };
+        }
+        if (result.kind === "pdf") {
+          // Route through the PDF text extractor so the model sees prose,
+          // not a base64 data URL.
+          try {
+            const pdf = await window.helixApi.readPdf(entry.path);
+            composer.attachWorkspaceFile({
+              absPath: entry.path,
+              relPath,
+              content: pdf.truncated
+                ? `${pdf.text}\n\n[…content truncated at extractor cap]`
+                : pdf.text,
+            });
+            return {
+              ok: true,
+              message: pdf.truncated
+                ? `Attached ${relPath} (truncated)`
+                : `Attached ${relPath}`,
+            };
+          } catch (err) {
+            return {
+              ok: false,
+              message: `PDF extract failed: ${err instanceof Error ? err.message : String(err)}`,
+            };
+          }
+        }
+        if (result.kind === "image") {
+          return {
+            ok: false,
+            message: "Images aren't attachable yet — drop the file directly into the composer instead.",
+          };
+        }
+        return { ok: false, message: "Unsupported file type." };
+      } catch (err) {
+        return {
+          ok: false,
+          message: `Read failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
       }
     },
     [workspacesApi.activeWorkspace],
@@ -409,9 +451,6 @@ export function App() {
                 setContextResetAt={sessionsApi.setContextResetAt}
                 createSession={sessionsApi.createSession}
                 composerRef={composerRef}
-                onAddContext={
-                  hasWorkspacePath ? () => setPanelOpen(true) : undefined
-                }
               />
             )}
           </>
@@ -437,7 +476,7 @@ export function App() {
               note.title,
             );
           }}
-          onSelectFile={(entry) => void handleAttachFileToContext(entry)}
+          onSelectFile={(entry) => handleAttachFileToContext(entry)}
         />
       ) : null}
       {isAddingWorkspace ? (
@@ -466,9 +505,6 @@ interface ChatViewProps {
    * workspace files into pending context when the user clicks them in the
    * right sidebar. */
   readonly composerRef?: Ref<ComposerHandle>;
-  /** Reveal the workspace pane (where the user can pick files / notes
-   * to attach). Wired from the composer's "+ Add context" chip. */
-  readonly onAddContext?: () => void;
 }
 
 function PaneFallback() {
@@ -482,7 +518,6 @@ function ChatView({
   setContextResetAt,
   createSession,
   composerRef,
-  onAddContext,
 }: ChatViewProps) {
   const { activeProvider } = useProviders();
   const messages = activeSession?.transcript ?? EMPTY_MESSAGES;
@@ -573,7 +608,6 @@ function ChatView({
         onResetContext={onResetContext}
         onClearTranscript={onClearTranscript}
         workspacePath={activeWorkspace?.path || undefined}
-        onAddContext={onAddContext}
       />
     </>
   );

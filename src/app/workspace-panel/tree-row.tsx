@@ -6,11 +6,21 @@ interface TreeRowProps {
   readonly entry: TreeEntry;
   readonly expanded: boolean;
   readonly onToggle: () => void;
-  /** Click on a file row. Folders ignore this and run `onToggle` instead. */
+  /** Single-click on a file row attaches the file as chat context. Folders
+   * ignore this and run `onToggle` instead. */
   readonly onSelectFile?: (entry: TreeEntry) => void;
+  /** Double-click on a file row. Wired by the panel for "open in main
+   * pane" (e.g. markdown notes). Falls back to `onSelectFile` when no
+   * dedicated handler is supplied so a missed double-click still does
+   * something useful. */
+  readonly onOpenFile?: (entry: TreeEntry) => void;
   /** Right-click on a row. Files surface "add to context / reveal / delete";
    * folders surface "new markdown file / reveal". */
   readonly onContextMenu?: (e: ReactMouseEvent, entry: TreeEntry) => void;
+  /** True when this row was just attached to chat context. The panel
+   * pulses the row briefly so the user sees the click landed without
+   * having to scan to the composer for the new chip. */
+  readonly justAttached?: boolean;
 }
 
 export function TreeRow({
@@ -18,7 +28,9 @@ export function TreeRow({
   expanded,
   onToggle,
   onSelectFile,
+  onOpenFile,
   onContextMenu,
+  justAttached,
 }: TreeRowProps) {
   const isFolder = entry.kind === "folder";
   const size = formatSize(entry.size);
@@ -28,21 +40,42 @@ export function TreeRow({
   const onClick = isFolder
     ? onToggle
     : onSelectFile
-      ? () => onSelectFile(entry)
+      ? (e: ReactMouseEvent) => {
+          // Native browsers fire a `click` for every leg of a double-click,
+          // so the parent gets two attaches per dblclick. Detail >= 2
+          // means "this click is part of a (double|triple) click sequence"
+          // — we let the dblclick handler take it instead.
+          if (e.detail >= 2 && onOpenFile) return;
+          onSelectFile(entry);
+        }
       : undefined;
+  const onDoubleClick = isFolder || !onOpenFile
+    ? undefined
+    : () => onOpenFile(entry);
   const fileTitle = !isFolder
-    ? `${entry.path}\nClick to attach this file as context for the next message.\nRight-click for more.`
-    : `${entry.path}\nRight-click for actions.`;
+    ? `${entry.path}\nClick: attach as context for the next message.\nDouble-click: open in main pane.\nRight-click: more actions.`
+    : `${entry.path}\nClick: expand / collapse.\nRight-click: actions.`;
   return (
     <button
       type="button"
       className="tree-row"
       data-kind={entry.kind}
+      data-just-attached={justAttached || undefined}
       style={{ paddingLeft: 8 + entry.depth * 12 }}
       title={fileTitle}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onContextMenu={
-        onContextMenu ? (e) => onContextMenu(e, entry) : undefined
+        onContextMenu
+          ? (e) => {
+              // Belt-and-braces: the parent scroll container also wires
+              // onContextMenu (for the empty-area menu). Stop propagation
+              // here so the row's own menu wins on right-click.
+              e.preventDefault();
+              e.stopPropagation();
+              onContextMenu(e, entry);
+            }
+          : undefined
       }
     >
       <span className="tree-row-icon" aria-hidden>

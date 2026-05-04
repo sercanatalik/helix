@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { NoteId, NoteRecord } from "../types";
-import { TrashIcon } from "./icons";
+import { NewNoteIcon, TrashIcon } from "./icons";
 
 interface PanelNotesSectionProps {
   readonly notes: readonly NoteRecord[];
@@ -11,6 +11,9 @@ interface PanelNotesSectionProps {
    * before actually calling the destructive backend op. */
   readonly onRequestDelete: (note: NoteRecord) => void;
   readonly onOpenWindow: (note: NoteRecord) => void;
+  /** Click "+ New note". The panel forwards this to App-level createNote
+   * which writes a fresh `untitled-N.md` to disk and opens it as a tab. */
+  readonly onCreateNote: () => void;
 }
 
 export function PanelNotesSection({
@@ -20,18 +23,24 @@ export function PanelNotesSection({
   onSelect,
   onRequestDelete,
   onOpenWindow,
+  onCreateNote,
 }: PanelNotesSectionProps) {
   return (
     <div className="panel-notes">
-      <div className="panel-section-label">
-        <span>Notes</span>
-        <span className="panel-section-count">
-          {loading && notes.length === 0 ? "scanning…" : notes.length}
-        </span>
-      </div>
+      <button
+        type="button"
+        className="panel-new-note"
+        onClick={onCreateNote}
+        title="New note — writes a fresh markdown file to the workspace"
+      >
+        <NewNoteIcon />
+        <span>New note</span>
+      </button>
       {notes.length === 0 ? (
         <div className="panel-empty">
-          {loading ? "Scanning workspace…" : "No markdown files yet."}
+          {loading
+            ? "Scanning workspace…"
+            : "No markdown files yet. Click \"New note\" to create one."}
         </div>
       ) : (
         notes.map((n) => (

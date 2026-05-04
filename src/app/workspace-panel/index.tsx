@@ -28,13 +28,27 @@ interface WorkspacePanelProps {
   readonly onDeleteNote: (id: NoteId) => Promise<void> | void;
   /** Cmd/Ctrl+Shift+Click on a note row pops it into a detached window. */
   readonly onOpenNoteWindow: (note: NoteRecord) => void;
-  /** File row clicked. The parent reads the file via the `read_file` Tauri
-   * command and pushes its content into the chat composer's pending context.
-   * Folders are still handled internally by the panel (toggle expansion). */
-  readonly onSelectFile?: (entry: TreeEntry) => void;
+  /** File row clicked (single click). The parent reads the file via the
+   * `read_file` Tauri command and pushes its content into the chat
+   * composer's pending context. Returns an `AttachFileResult` so the
+   * panel can show a notice describing what landed (or why nothing
+   * did). Folders are handled internally by the panel (toggle
+   * expansion). */
+  readonly onSelectFile?: (
+    entry: TreeEntry,
+  ) => Promise<AttachFileResult> | AttachFileResult | void;
 }
 
 type PanelTab = "files" | "notes";
+
+/** Outcome the App returns from a file-attach attempt. The panel uses
+ * `message` to flash a transient toast under the row so the user sees
+ * what landed (or didn't), without scanning to the composer for the
+ * new chip. */
+export interface AttachFileResult {
+  readonly ok: boolean;
+  readonly message?: string;
+}
 
 type LoadState =
   | { kind: "idle" }
@@ -66,6 +80,112 @@ export function WorkspacePanel({
   onSelectFile,
 }: WorkspacePanelProps) {
   const [tab, setTab] = useState<PanelTab>("files");
+  // Path of a row that was just clicked to attach. Cleared after ~1.4s so
+  // the row's pulse animation runs once per click.
+  const [justAttachedPath, setJustAttachedPath] = useState<string | null>(null);
+
+  // Wraps the parent's onSelectFile so single-click both attaches AND lights
+  // up the row, with a panel-footer notice once the attach resolves so the
+  // user sees confirmation right next to the cursor instead of scanning to
+  // the composer for the new chip.
+  const handleClickFile = useCallback(
+    async (entry: TreeEntry) => {
+      if (entry.kind !== "file") return;
+      // Optimistic pulse — the row lights up the moment the user clicks,
+      // even before the read round-trip resolves.
+      setJustAttachedPath(entry.path);
+      const pulseHandle = window.setTimeout(() => {
+        setJustAttachedPath((curr) => (curr === entry.path ? null : curr));
+      }, 1400);
+      try {
+        const out = await onSelectFile?.(entry);
+        if (out) {
+          setNotice({
+            tone: out.ok ? "info" : "error",
+            message: out.message ?? (out.ok ? "Attached." : "Failed to attach."),
+          });
+          if (!out.ok) {
+            // Cancel the pulse early — the row lit up but nothing actually
+            // landed, so leaving it highlighted reads as a false positive.
+            window.clearTimeout(pulseHandle);
+            setJustAttachedPath((curr) =>
+              curr === entry.path ? null : curr,
+            );
+          }
+        }
+      } catch (err) {
+        window.clearTimeout(pulseHandle);
+        setJustAttachedPath((curr) => (curr === entry.path ? null : curr));
+        setNotice({
+          tone: "error",
+          message: `Attach failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    },
+    [onSelectFile],
+  );
+
+  // Wraps the parent's onCreateNote so the panel can flash a clear notice
+  // when creation succeeds or fails. The parent's hook already swallows
+  // errors into a separate `error` field that wasn't surfaced anywhere
+  // visible — without this wrapper, clicking "New note" looked like a
+  // dead button when the workspace had no folder path attached.
+  const handleCreateNote = useCallback(async () => {
+    if (!workspace.path) {
+      setNotice({
+        tone: "error",
+        message:
+          "Attach a workspace folder first — notes write to the workspace's `.helix/notes` directory.",
+      });
+      return;
+    }
+    try {
+      const note = await onCreateNote();
+      if (!note) {
+        setNotice({
+          tone: "error",
+          message:
+            "Couldn't create a new note. Check the workspace folder is writable.",
+        });
+        return;
+      }
+      // Auto-flip to the notes tab so the user sees the row that just
+      // landed; otherwise the click feels silent on the Files tab.
+      setTab("notes");
+      setNotice({
+        tone: "info",
+        message: `Created ${note.relativePath}`,
+      });
+    } catch (err) {
+      setNotice({
+        tone: "error",
+        message: `New note failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }, [onCreateNote, workspace.path]);
+
+  // Double-click on a `.md` file opens it in the main-pane note editor by
+  // routing through the existing notes list — same affordance the Notes
+  // tab provides. Non-markdown files don't have a renderer yet, so they
+  // fall back to the single-click "attach as context" behaviour.
+  const handleOpenFile = useCallback(
+    (entry: TreeEntry) => {
+      if (entry.kind !== "file") return;
+      const isMd = /\.mdx?$/i.test(entry.name);
+      if (isMd) {
+        const match = notes.find((n) => n.path === entry.path);
+        if (match) {
+          onSelectNote(match.id);
+          return;
+        }
+      }
+      // No renderer for this file type / not in the notes index — re-fire
+      // the attach so the user gets the same feedback they expect from
+      // a single click.
+      handleClickFile(entry);
+    },
+    [notes, onSelectNote, handleClickFile],
+  );
   const [load, setLoad] = useState<LoadState>({ kind: "idle" });
   // Local expand/collapse state, keyed by folder path. Defaults to "open" for
   // the root level (depth 0) so the user sees something on first paint.
@@ -224,13 +344,23 @@ export function WorkspacePanel({
 
   const handleNewMarkdown = useCallback(
     async (parentDir: string) => {
-      if (!workspace.path) return;
+      if (!workspace.path) {
+        setNotice({
+          tone: "error",
+          message:
+            "Attach a workspace folder first — markdown files write into the workspace.",
+        });
+        return;
+      }
       try {
         const note = await window.helixApi.createMarkdownFile(
           workspace.id,
           workspace.path,
           parentDir,
         );
+        // Markdown files surface in the Notes tab; flip there so the user
+        // sees the row land instead of having to switch tabs manually.
+        setTab("notes");
         setNotice({ tone: "info", message: `Created ${note.relativePath}` });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -262,9 +392,13 @@ export function WorkspacePanel({
   }, []);
 
   /** Begin a "new file" or "new folder" inline edit. Auto-expands the
-   * parent folder so the input row is visible without a second click. */
+   * parent folder so the input row is visible without a second click,
+   * and flips to the Files tab — the inline edit row only renders inside
+   * the file tree, so the user would otherwise see nothing happen if
+   * they invoked New file/folder from the Notes tab. */
   const beginNew = useCallback(
     (parentDir: string, parentDepth: number, entryKind: "file" | "folder") => {
+      setTab("files");
       setExpansion((prev) => {
         if (parentDir === workspace.path) return prev;
         if (prev[parentDir] === true) return prev;
@@ -371,7 +505,7 @@ export function WorkspacePanel({
             <button
               type="button"
               className="panel-icon-btn"
-              onClick={() => void onCreateNote()}
+              onClick={() => void handleCreateNote()}
               title="New note"
               aria-label="New note"
             >
@@ -395,7 +529,13 @@ export function WorkspacePanel({
         // background menu (workspace-root scoped: only "New markdown file"
         // makes sense). Rows handle their own contextmenu and stop
         // propagation so they don't bubble up to this generic handler.
-        onContextMenu={(e) => openMenu(e, null)}
+        onContextMenu={(e) => {
+          // Only handle when the right-click landed on the scroll
+          // container itself, not bubbled from a child that didn't stop
+          // propagation. Stops the OS context menu either way.
+          if (e.target !== e.currentTarget) return;
+          openMenu(e, null);
+        }}
       >
         {notice ? (
           <div className="panel-empty" data-tone={notice.tone} role="status">
@@ -410,6 +550,7 @@ export function WorkspacePanel({
             onSelect={onSelectNote}
             onRequestDelete={setPendingDelete}
             onOpenWindow={onOpenNoteWindow}
+            onCreateNote={() => void handleCreateNote()}
           />
         ) : null}
         {tab === "files" ? (
@@ -464,8 +605,10 @@ export function WorkspacePanel({
                             : false
                         }
                         onToggle={() => toggleFolder(entry.path, entry.depth)}
-                        onSelectFile={onSelectFile}
+                        onSelectFile={handleClickFile}
+                        onOpenFile={handleOpenFile}
                         onContextMenu={(e) => openMenu(e, entry)}
+                        justAttached={justAttachedPath === entry.path}
                       />
                     )}
                     {newChildHere && edit ? (

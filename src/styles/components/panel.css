@@ -162,10 +162,37 @@
   cursor: pointer;
   text-align: left;
   font-family: var(--font-sans);
+  user-select: none;
 }
 .tree-row:hover {
   background: var(--bg-elev);
   color: var(--fg);
+}
+.tree-row:active {
+  background: var(--accent-soft);
+}
+/* Single-click feedback: file just attached to chat context. The pulse
+ * is short (~1.3s) so it doesn't linger if the user clicks several rows
+ * in quick succession — each click resets the highlight to the latest
+ * row. Clicks far from the composer otherwise feel silent because the
+ * chip appears at the bottom-center of the chat view, not next to the
+ * cursor. */
+.tree-row[data-just-attached] {
+  animation: helix-tree-attach 1.3s cubic-bezier(0.3, 0.8, 0.3, 1);
+}
+@keyframes helix-tree-attach {
+  0% {
+    background: var(--accent-soft);
+    box-shadow: inset 2px 0 0 var(--accent-raw);
+  }
+  60% {
+    background: color-mix(in oklab, var(--accent-soft) 50%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent-raw) 60%, transparent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 2px 0 0 transparent;
+  }
 }
 .tree-row[data-kind="folder"] {
   color: var(--fg);
@@ -271,7 +298,37 @@
 
 /* ---------- Workspace panel: notes section -------------------------- */
 .panel-notes {
-  padding: 0 6px 8px;
+  padding: 6px 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* Primary action surfaced inline so users have a clear "+ New note" CTA
+ * without having to find the toolbar icon. Matches the chats sidebar's
+ * filled-fg new-conversation button for consistency. */
+.panel-new-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.panel-new-note:hover {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.panel-new-note svg {
+  color: var(--accent-raw);
+  flex-shrink: 0;
 }
 .panel-section-label {
   display: flex;

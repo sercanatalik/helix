@@ -146,32 +146,88 @@
   flex: 1;
 }
 
-/* ---------- Composer context chips (loaded prompts / resources) ---------- */
+/* ---------- Composer context strip ----------
+ * Sits at the very top of the composer area (just below the transcript)
+ * so files / prompts / resources / notes the user has cued up read as
+ * "queued for the next message" rather than as toolbar metadata. Each
+ * chip carries a kind icon + name + remove ×; file chips get a brighter
+ * accent treatment since they're the leading context. */
 .composer-context {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  padding: 6px 4px 0;
+  padding: 6px 2px 8px;
+  border-bottom: 1px dashed var(--border-subtle);
+  margin-bottom: 6px;
+}
+.composer-context-leadin {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  padding: 0 4px 0 2px;
+  user-select: none;
 }
 .composer-context-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 4px 4px 9px;
+  padding: 3px 4px 3px 8px;
   border-radius: 14px;
-  border: 1px solid color-mix(in oklab, var(--accent-raw) 28%, transparent);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: 11px;
+  max-width: 260px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.composer-context-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.composer-context-chip[data-kind="file"] {
+  border-color: var(--accent-ring);
   background: var(--accent-soft);
   color: var(--fg);
-  font-size: 11px;
-  max-width: 280px;
+}
+.composer-context-chip[data-kind="prompt"] {
+  border-color: color-mix(in oklab, var(--kind-prompt) 35%, transparent);
+  background: color-mix(in oklab, var(--kind-prompt) 10%, var(--bg-elev));
+}
+.composer-context-chip[data-kind="resource"] {
+  border-color: color-mix(in oklab, var(--kind-resource) 35%, transparent);
+  background: color-mix(in oklab, var(--kind-resource) 10%, var(--bg-elev));
+}
+.composer-context-chip[data-kind="custom"] {
+  border-color: color-mix(in oklab, var(--fg-muted) 30%, transparent);
+}
+.composer-context-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--fg-dim);
+}
+.composer-context-chip[data-kind="file"] .composer-context-icon {
+  color: var(--accent-raw);
+}
+.composer-context-chip[data-kind="prompt"] .composer-context-icon {
+  color: var(--kind-prompt);
+}
+.composer-context-chip[data-kind="resource"] .composer-context-icon {
+  color: var(--kind-resource);
 }
 .composer-context-kind {
   font-family: var(--font-mono);
   font-size: 9.5px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--accent-raw);
+  color: var(--fg-dim);
   font-weight: 600;
+}
+.composer-context-chip[data-kind="file"] .composer-context-kind {
+  color: var(--accent-raw);
 }
 .composer-context-label {
   font-family: var(--font-mono);
@@ -183,8 +239,8 @@
   min-width: 0;
 }
 .composer-context-remove {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -199,8 +255,8 @@
   flex-shrink: 0;
 }
 .composer-context-remove:hover {
-  color: var(--fg);
-  background: var(--bg-elev-2);
+  color: var(--danger);
+  background: color-mix(in oklab, var(--danger) 12%, var(--bg-elev));
 }
 
 /* ---------- MCP palette (tag-grouped toolbox) ---------- */
@@ -1014,6 +1070,256 @@ button.mcp-tool-chip:disabled {
   margin: 0;
   list-style: none;
   max-height: 280px;
+}
+
+/* ---------- Context popover ----------
+ * Opens from the "Context" chip in the composer toolbar. Shows three
+ * stacked sections: persistent system prompt, attached one-shot entries
+ * (file/prompt/resource/custom), and an inline "add a note" form. Same
+ * chrome as the MCP / built-in palettes so the user reads it as the same
+ * family of surface. */
+.ctx-popover {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 4px 0;
+  border: 1px solid var(--border-raw);
+  background: var(--bg-elev);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  max-height: 520px;
+  overflow: hidden;
+}
+.ctx-popover-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ctx-popover-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+}
+.ctx-popover-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+.ctx-popover-close {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+.ctx-popover-close:hover {
+  color: var(--fg);
+  background: var(--bg-elev-2);
+}
+.ctx-popover-body {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 8px 12px 12px;
+  gap: 14px;
+}
+
+/* ---------- Section primitives ---------- */
+.ctx-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ctx-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+}
+.ctx-section-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+}
+.ctx-section-meta {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--fg-dim);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ctx-textarea {
+  width: 100%;
+  min-height: 72px;
+  max-height: 280px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  outline: none;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 6px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.ctx-textarea:focus {
+  border-color: var(--accent-ring);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ctx-textarea::placeholder {
+  color: var(--fg-dim);
+}
+.ctx-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.ctx-input:focus {
+  border-color: var(--accent-ring);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ctx-input::placeholder {
+  color: var(--fg-dim);
+}
+.ctx-section-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+.ctx-section-counter {
+  letter-spacing: 0.02em;
+}
+.ctx-section-spacer {
+  flex: 1;
+}
+.ctx-empty {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  font-style: italic;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 6px;
+  line-height: 1.45;
+}
+
+/* ---------- Attachment list ---------- */
+.ctx-attach-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ctx-attach-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px 7px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.ctx-attach-row[data-kind="file"] {
+  border-left: 3px solid var(--accent-raw);
+}
+.ctx-attach-row[data-kind="prompt"] {
+  border-left: 3px solid var(--kind-prompt);
+}
+.ctx-attach-row[data-kind="resource"] {
+  border-left: 3px solid var(--kind-resource);
+}
+.ctx-attach-row[data-kind="custom"] {
+  border-left: 3px solid var(--fg-muted);
+}
+.ctx-attach-kind {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-subtle);
+  align-self: start;
+}
+.ctx-attach-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ctx-attach-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctx-attach-preview {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctx-attach-remove {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  align-self: start;
+}
+.ctx-attach-remove:hover {
+  color: var(--danger);
+  border-color: color-mix(in oklab, var(--danger) 35%, transparent);
+  background: color-mix(in oklab, var(--danger) 10%, var(--bg-elev));
 }
 
 /* ---------- Context window meter ----------

@@ -25,10 +25,28 @@ struct BuiltinSource {
     skill_md: &'static str,
 }
 
-const BUILTIN_SOURCES: &[BuiltinSource] = &[BuiltinSource {
-    dir_name: "writing-format-markdown",
-    skill_md: include_str!("builtin_skills/writing-format-markdown.md"),
-}];
+const BUILTIN_SOURCES: &[BuiltinSource] = &[
+    BuiltinSource {
+        dir_name: "writing-format-markdown",
+        skill_md: include_str!("builtin_skills/writing-format-markdown.md"),
+    },
+    BuiltinSource {
+        dir_name: "rephrase-friendly",
+        skill_md: include_str!("builtin_skills/rephrase-friendly.md"),
+    },
+    BuiltinSource {
+        dir_name: "rephrase-professional",
+        skill_md: include_str!("builtin_skills/rephrase-professional.md"),
+    },
+    BuiltinSource {
+        dir_name: "rephrase-concise",
+        skill_md: include_str!("builtin_skills/rephrase-concise.md"),
+    },
+    BuiltinSource {
+        dir_name: "rephrase-clear",
+        skill_md: include_str!("builtin_skills/rephrase-clear.md"),
+    },
+];
 
 /// Parse every embedded skill into a `Skill` record. Called once on startup
 /// and every rescan; cheap (parsing happens against in-memory strings).
@@ -86,5 +104,27 @@ mod tests {
         assert!(s.user_invocable);
         assert!(!s.body.is_empty());
         assert!(s.description.is_some());
+    }
+
+    #[test]
+    fn rephrase_skills_load() {
+        let skills = load();
+        for name in [
+            "rephrase-friendly",
+            "rephrase-professional",
+            "rephrase-concise",
+            "rephrase-clear",
+        ] {
+            let s = skills
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap_or_else(|| panic!("{name} built-in not found"));
+            assert!(matches!(s.source, SkillSource::Builtin));
+            assert_eq!(s.id, format!("builtin::{name}"));
+            assert!(s.error.is_none(), "{name} parse error: {:?}", s.error);
+            assert!(s.user_invocable);
+            assert!(!s.body.is_empty());
+            assert!(s.description.is_some());
+        }
     }
 }

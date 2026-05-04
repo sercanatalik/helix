@@ -16,6 +16,7 @@ import { useMcpEnabledTags } from "../../../hooks/use-mcp-enabled-tags";
 import { useModels } from "../../../hooks/use-models";
 import { useProxy } from "../../../hooks/use-proxy";
 import { useSkills } from "../../../hooks/use-skills";
+import { useSystemPrompt } from "../../../hooks/use-system-prompt";
 import type { ChatExtras, McpToolBinding } from "../../../hooks/use-chat";
 import type { ProviderConfig } from "../../providers";
 import {
@@ -41,6 +42,7 @@ import {
   itemEnabledByTags,
   type PendingContextEntry,
 } from "./pending-context";
+import { SystemPromptPopover } from "./system-prompt-popover";
 import {
   buildSkillContext,
   EMPTY_SLASH_ITEMS,
@@ -88,10 +90,6 @@ interface ComposerProps {
    * inside it, and surfaced as a system-context entry on each send so the
    * model knows where it is. */
   readonly workspacePath?: string;
-  /** Reveal the workspace pane and put focus on its files section so the
-   * user can pick something to attach. Wired by the parent because panel
-   * visibility lives on the App. */
-  readonly onAddContext?: () => void;
 }
 
 /** Imperative surface the parent (App) reaches into when the user clicks a
@@ -127,7 +125,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     onResetContext,
     onClearTranscript,
     workspacePath,
-    onAddContext,
   },
   ref,
 ) {
@@ -135,6 +132,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [open, setOpen] = useState<boolean>(false);
   const [builtinOpen, setBuiltinOpen] = useState<boolean>(false);
   const [modelMenuOpen, setModelMenuOpen] = useState<boolean>(false);
+  const [systemPromptOpen, setSystemPromptOpen] = useState<boolean>(false);
+  const { systemPrompt, setSystemPrompt } = useSystemPrompt();
   // One-shot status line for built-in slash commands that write to disk
   // (`/write-to-workspace`). Self-clears after a few seconds so the
   // composer doesn't hold onto stale messages. Distinct from `hint` —
@@ -163,6 +162,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const mcpPopoverRef = useRef<HTMLDivElement>(null);
   const builtinTriggerRef = useRef<HTMLButtonElement>(null);
   const builtinPopoverRef = useRef<HTMLDivElement>(null);
+  const systemPromptTriggerRef = useRef<HTMLButtonElement>(null);
+  const systemPromptPopoverRef = useRef<HTMLDivElement>(null);
   const canSend =
     text.trim().length > 0 && !disabled && !isStreaming && !!activeModel;
 
@@ -221,6 +222,20 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [builtinOpen]);
+
+  // Same dismiss handler for the system-prompt editor popover.
+  useEffect(() => {
+    if (!systemPromptOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (systemPromptTriggerRef.current?.contains(target)) return;
+      if (systemPromptPopoverRef.current?.contains(target)) return;
+      setSystemPromptOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [systemPromptOpen]);
 
   // Register the React-side clear handler, the active workspace folder,
   // and the corporate proxy snapshot so the built-in tool dispatcher can
@@ -325,11 +340,20 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const clearItem = (key: string) =>
     setItemState(({ [key]: _drop, ...rest }) => rest);
 
-  /** Add a prompt / resource to the hidden context cart for the next send.
-   * No-op when the same item is already pending (idempotent click). */
+  /** Add a prompt / resource / file to the hidden context cart for the
+   * next send. No-op when the same item is already pending (idempotent
+   * click). File entries jump to the front of the queue so the model sees
+   * them as its first instruction — same intent as Claude Code's "I just
+   * pasted this file, look here first" pattern. */
   const addPendingContext = useCallback((entry: PendingContextEntry) => {
     setPendingContext((prev) => {
       if (prev.some((p) => p.id === entry.id)) return prev;
+      if (entry.kind === "file") {
+        // Most-recent file wins position 0; earlier files (and any non-file
+        // entries) follow. Keeps "click the file, it becomes the first
+        // instruction" obvious in the popover.
+        return [entry, ...prev];
+      }
       return [...prev, entry];
     });
   }, []);
@@ -502,7 +526,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     const userText = text;
     setText("");
     const attachments = pendingContext;
-    const oneShotContext = attachments.map((p) => p.content);
+    // File attachments lead the context — when the user clicks a file in
+    // the workspace pane, the file content becomes the model's first
+    // instruction. Other one-shot entries (MCP prompt/resource, custom
+    // notes) sit after persona / workspace pinning so they're closer to
+    // the user message they're modifying.
+    const fileContext = attachments
+      .filter((p) => p.kind === "file")
+      .map((p) => p.content);
+    const otherOneShotContext = attachments
+      .filter((p) => p.kind !== "file")
+      .map((p) => p.content);
     setPendingContext([]);
 
     const promptContext = await fetchEnabledPromptContext();
@@ -514,17 +548,25 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       attachments,
     );
     const workspaceContext = buildWorkspaceContext(workspacePath);
+    // User-edited override sets the model's persona; empty / whitespace
+    // is dropped so an unset prompt stays a no-op rather than a literal
+    // empty system message.
+    const systemPromptContext: string[] = systemPrompt.trim().length
+      ? [systemPrompt.trim()]
+      : [];
 
     const extras: ChatExtras = {
-      // Workspace pin goes first so the model has the working directory
-      // grounded before any user-facing prompt or skill body renders.
-      // Persistent prompt context follows so it can lean on that pin;
-      // one-shot resources come next; the skill body sits closest to the
-      // user's text — same ordering Claude Code uses.
+      // Order: clicked-file content → user persona → workspace pin →
+      // persistent prompts → one-shot resources/notes → skill body
+      // (closest to the user's text). Files lead so the model has the
+      // primary material in its working set before any framing instruction
+      // shifts its behavior.
       systemContext: [
+        ...fileContext,
+        ...systemPromptContext,
         ...workspaceContext,
         ...promptContext,
-        ...oneShotContext,
+        ...otherOneShotContext,
         ...skillContext,
       ],
       mcpTools: mcpToolBindings,
@@ -598,6 +640,20 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   return (
     <div className="composer-wrap">
       <div className="composer-inner">
+        {pendingContext.length > 0 ? (
+          <div className="composer-context" role="list" aria-label="Attached context">
+            <span className="composer-context-leadin" aria-hidden>
+              Attached
+            </span>
+            {pendingContext.map((entry) => (
+              <PendingContextChip
+                key={entry.id}
+                entry={entry}
+                onRemove={() => removePendingContext(entry.id)}
+              />
+            ))}
+          </div>
+        ) : null}
         {notice || hint ? (
           <div className="composer-status">{notice ?? hint}</div>
         ) : null}
@@ -620,14 +676,27 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             disabled={!anyConnected}
             onClick={togglePopover}
           />
-          {onAddContext ? (
-            <ToolChip
-              icon={<PlusIcon />}
-              label="Add context"
-              tooltip="Attach files, prompts, or resources for the next message"
-              onClick={onAddContext}
-            />
-          ) : null}
+          <ToolChip
+            buttonRef={systemPromptTriggerRef}
+            icon={<PlusIcon />}
+            label="Context"
+            count={
+              systemPrompt.trim().length > 0
+                ? pendingContext.length + 1
+                : pendingContext.length || undefined
+            }
+            active={
+              systemPromptOpen ||
+              systemPrompt.trim().length > 0 ||
+              pendingContext.length > 0
+            }
+            tooltip={
+              pendingContext.length > 0 || systemPrompt.trim().length > 0
+                ? "View, edit, or add context for the next message"
+                : "Add a system prompt or notes for the model"
+            }
+            onClick={() => setSystemPromptOpen((v) => !v)}
+          />
           <span className="composer-tools-spacer" />
           <ContextUsageChip
             messages={messages ?? EMPTY_TRANSCRIPT}
@@ -655,41 +724,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           ) : null}
         </div>
 
-        {pendingContext.length > 0 ? (
-          <div className="composer-context" role="list">
-            {pendingContext.map((entry) => (
-              <span
-                key={entry.id}
-                role="listitem"
-                className="composer-context-chip"
-                data-kind={entry.kind}
-                title={
-                  entry.kind === "file"
-                    ? `Workspace file loaded via read_file — sent as hidden system context on the next message.`
-                    : `${entry.kind === "prompt" ? "Prompt" : "Resource"} from ${entry.serverName} — sent as hidden system context on the next message.`
-                }
-              >
-                <span className="composer-context-kind">
-                  {entry.kind === "prompt"
-                    ? "prompt"
-                    : entry.kind === "resource"
-                      ? "resource"
-                      : "file"}
-                </span>
-                <span className="composer-context-label">{entry.label}</span>
-                <button
-                  type="button"
-                  className="composer-context-remove"
-                  onClick={() => removePendingContext(entry.id)}
-                  aria-label={`Remove ${entry.label}`}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        ) : null}
-
         {open && anyConnected ? (
           <McpPalette
             popoverRef={mcpPopoverRef}
@@ -709,6 +743,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             isEnabled={builtinTools.isEnabled}
             onToggle={builtinTools.setEnabled}
             onClose={() => setBuiltinOpen(false)}
+          />
+        ) : null}
+
+        {systemPromptOpen ? (
+          <SystemPromptPopover
+            popoverRef={systemPromptPopoverRef}
+            systemPrompt={systemPrompt}
+            onSaveSystemPrompt={setSystemPrompt}
+            pendingContext={pendingContext}
+            onAddContext={addPendingContext}
+            onRemoveContext={removePendingContext}
+            onClose={() => setSystemPromptOpen(false)}
           />
         ) : null}
 
@@ -762,3 +808,124 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     </div>
   );
 });
+
+/* ---- Pending-context chip --------------------------------------------- */
+
+interface PendingContextChipProps {
+  readonly entry: PendingContextEntry;
+  readonly onRemove: () => void;
+}
+
+function PendingContextChip({ entry, onRemove }: PendingContextChipProps) {
+  const isFile = entry.kind === "file";
+  const title = isFile
+    ? `${entry.label}\nAttached via read_file — sent as the first system instruction on the next message.`
+    : entry.kind === "custom"
+      ? `${entry.label}\nCustom note — sent as system context on the next message.`
+      : `${entry.kind === "prompt" ? "Prompt" : "Resource"} from ${entry.serverName} — sent as system context on the next message.`;
+
+  return (
+    <span
+      role="listitem"
+      className="composer-context-chip"
+      data-kind={entry.kind}
+      title={title}
+    >
+      <span className="composer-context-icon" aria-hidden>
+        <ContextChipIcon kind={entry.kind} />
+      </span>
+      <span className="composer-context-kind">{kindLabel(entry.kind)}</span>
+      <span className="composer-context-label">
+        {isFile ? basenameOf(entry.label) : entry.label}
+      </span>
+      <button
+        type="button"
+        className="composer-context-remove"
+        onClick={onRemove}
+        aria-label={`Remove ${entry.label}`}
+        title="Remove from context"
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
+function kindLabel(kind: PendingContextEntry["kind"]): string {
+  switch (kind) {
+    case "file":
+      return "file";
+    case "prompt":
+      return "prompt";
+    case "resource":
+      return "resource";
+    case "custom":
+      return "note";
+  }
+}
+
+function basenameOf(path: string): string {
+  const cleaned = path.replace(/[\\/]+$/, "");
+  const sep = cleaned.lastIndexOf("/");
+  return sep < 0 ? cleaned : cleaned.slice(sep + 1);
+}
+
+function ContextChipIcon({
+  kind,
+}: {
+  readonly kind: PendingContextEntry["kind"];
+}) {
+  if (kind === "file") {
+    return (
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <path d="M14 2v6h6" />
+      </svg>
+    );
+  }
+  if (kind === "custom") {
+    return (
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z" />
+      </svg>
+    );
+  }
+  // Prompt / resource — generic doc icon, color-coded via the chip kind.
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8 7h8M8 12h8M8 17h5" />
+    </svg>
+  );
+}

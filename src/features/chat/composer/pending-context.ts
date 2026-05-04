@@ -1,12 +1,14 @@
-/** A prompt, resource, or workspace file the user has loaded into context
- * for the next message. Stored entirely on the frontend — sent to the model
- * as a system message via `ChatExtras.systemContext`, never written to the
- * transcript. The `file` kind is produced by clicking a file in the
- * workspace panel; its content rides through `read_file` so the header in
- * `contextHeader` names that tool. */
+/** A prompt, resource, workspace file, or free-form note the user has
+ * loaded into context for the next message. Stored entirely on the
+ * frontend — sent to the model as a system message via
+ * `ChatExtras.systemContext`, never written to the transcript. The
+ * `file` kind is produced by clicking a file in the workspace panel; its
+ * content rides through `read_file` so the header in `contextHeader`
+ * names that tool. The `custom` kind is a free-form text entry the user
+ * typed into the context popover. */
 export interface PendingContextEntry {
   readonly id: string;
-  readonly kind: "prompt" | "resource" | "file";
+  readonly kind: "prompt" | "resource" | "file" | "custom";
   readonly serverName: string;
   readonly label: string;
   readonly content: string;
@@ -17,15 +19,26 @@ export interface PendingContextEntry {
  * came from. Visible only inside the API call, never the transcript.
  *
  * The `file` variant is used when the user clicks a file in the workspace
- * panel — `serverName` is set to `"read_file"` so the model can correlate
- * the inline content with that built-in tool. */
+ * panel — content rides through the `read_file` built-in and the wrapper
+ * frames it as the *first* working-set instruction so the model treats
+ * the body as primary context, not background noise. The `custom`
+ * variant marks a free-form note the user typed in the composer's
+ * context popover. */
 export function contextHeader(
-  kind: "prompt" | "resource" | "file",
+  kind: "prompt" | "resource" | "file" | "custom",
   serverName: string,
   label: string,
 ): string {
   if (kind === "file") {
-    return `[helix workspace file · loaded via read_file · ${label}]\n`;
+    return [
+      `[helix workspace file · loaded via read_file · ${label}]`,
+      `Instruction: the user attached this file as primary context for the next message. Read it first, treat its contents as authoritative for any question about \`${label}\`, and use it before falling back to other context or memory. The full body follows the divider.`,
+      "---",
+      "",
+    ].join("\n");
+  }
+  if (kind === "custom") {
+    return `[helix user context · ${label}]\n`;
   }
   return `[helix mcp ${kind} · ${serverName} · ${label}]\n`;
 }

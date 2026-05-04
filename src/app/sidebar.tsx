@@ -86,16 +86,16 @@ export function Sidebar({
     <aside className="chats-col">
       <div className="chats-col-drag" />
       <div className="chats-header">
-        <div className="workspace-title">
+        <div className="workspace-title" title={workspace?.path || undefined}>
           <div className="workspace-title-row">
             <FolderIcon />
             <span className="workspace-title-name">
               {workspace?.displayName ?? "helix-ai"}
             </span>
           </div>
-          <span className="workspace-title-path" title={workspace?.path || undefined}>
-            {workspace?.path || "scaffold workspace"}
-          </span>
+          {workspace?.path ? (
+            <span className="workspace-title-parent">{parentDirOf(workspace.path)}</span>
+          ) : null}
         </div>
         <button
           type="button"
@@ -161,6 +161,7 @@ interface ChatRowProps {
 
 function ChatRow({ session, active, onSelect, onDelete }: ChatRowProps) {
   const preview = previewOf(session);
+  const counts = useMemo(() => countMessagesAndTools(session), [session]);
   return (
     <div
       className="chat-row"
@@ -178,6 +179,16 @@ function ChatRow({ session, active, onSelect, onDelete }: ChatRowProps) {
       <span className="chat-row-title">{session.title}</span>
       <span className="chat-row-time">{relativeTime(session.updatedAt)}</span>
       <span className="chat-row-preview">{preview}</span>
+      <span className="chat-row-counts" aria-label="message and tool counts">
+        <span className="chat-row-count">
+          <ChatBubbleIcon /> {counts.messages}
+        </span>
+        {counts.tools > 0 ? (
+          <span className="chat-row-count">
+            <ToolIcon /> {counts.tools}
+          </span>
+        ) : null}
+      </span>
       <button
         type="button"
         className="chat-row-delete"
@@ -191,6 +202,31 @@ function ChatRow({ session, active, onSelect, onDelete }: ChatRowProps) {
       </button>
     </div>
   );
+}
+
+function countMessagesAndTools(session: SessionRecord): {
+  readonly messages: number;
+  readonly tools: number;
+} {
+  let messages = 0;
+  let tools = 0;
+  for (const m of session.transcript) {
+    messages++;
+    if (m.toolCalls) tools += m.toolCalls.length;
+  }
+  return { messages, tools };
+}
+
+function parentDirOf(path: string): string {
+  const cleaned = path.replace(/[\\/]+$/, "");
+  const sep = cleaned.lastIndexOf("/");
+  if (sep <= 0) return cleaned;
+  const parent = cleaned.slice(0, sep);
+  // Show only the last segment of the parent — full paths are noise in the
+  // header and get clipped by ellipsis anyway. The parent directory is the
+  // useful disambiguator (`docs` could live under any of N projects).
+  const lastSep = parent.lastIndexOf("/");
+  return lastSep < 0 ? parent : parent.slice(lastSep + 1);
 }
 
 interface SessionGroup {
@@ -301,6 +337,42 @@ function SearchIcon() {
     >
       <circle cx="11" cy="11" r="7" />
       <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+function ChatBubbleIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function ToolIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
     </svg>
   );
 }

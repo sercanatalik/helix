@@ -6,8 +6,9 @@ interface ToolChipProps {
   readonly label: string;
   /** Either a plain count (`5`) or a ratio string (`5/8`). gcf-desktop uses
    * the ratio for tools/prompts so a quick glance shows how much of what's
-   * available is currently in play. */
-  readonly count: number | string;
+   * available is currently in play. Omit for action chips (e.g.
+   * "+ Add context") that don't carry a numeric counter. */
+  readonly count?: number | string;
   readonly active?: boolean;
   readonly disabled?: boolean;
   readonly onClick?: () => void;
@@ -47,8 +48,12 @@ export function ToolChip({
         {icon}
       </span>
       {label}
-      <span className="tool-chip-count">{count}</span>
-      <ChevronDownIcon />
+      {count !== undefined ? (
+        <>
+          <span className="tool-chip-count">{count}</span>
+          <ChevronDownIcon />
+        </>
+      ) : null}
     </button>
   );
 }

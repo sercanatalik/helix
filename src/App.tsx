@@ -131,7 +131,12 @@ export function App() {
     function handler(event: KeyboardEvent) {
       const mod = event.metaKey || event.ctrlKey;
       if (!mod) return;
-      if (event.key === "b") {
+      // ⌘⌥B toggles the workspace pane — checked before plain ⌘B because
+      // both share the `b` key and the alt modifier disambiguates them.
+      if (event.key === "b" && event.altKey) {
+        event.preventDefault();
+        setPanelOpen((v) => !v);
+      } else if (event.key === "b") {
         event.preventDefault();
         setSidebarCollapsed((v) => !v);
       } else if (event.key === ",") {
@@ -321,10 +326,20 @@ export function App() {
     ? notesApi.activeNote.id
     : "chat";
 
-  const chatSubtitle =
-    sessionsApi.activeSession?.title ??
-    workspacesApi.activeWorkspace?.displayName ??
-    undefined;
+  const sessionTitle = sessionsApi.activeSession?.title;
+  const sessionSkill = useMemo(() => {
+    const first = sessionsApi.activeSession?.transcript.find(
+      (m) => m.role === "user",
+    );
+    if (!first) return undefined;
+    const match = /^(\/[\w-]+)/.exec(first.content);
+    return match?.[1];
+  }, [sessionsApi.activeSession]);
+  const sessionStartedAt = sessionsApi.activeSession?.createdAt;
+
+  // Only render the tab strip when a note is open — when chat is the only
+  // surface, the integrated titlebar carries the session crumb instead.
+  const showDock = openNotes.length > 0;
 
   return (
     <div
@@ -334,16 +349,11 @@ export function App() {
     >
       <WorkspaceRail
         activeView={state.activeView}
-        onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
-        collapsed={sidebarCollapsed}
         onOpenSettings={() => void onSelectView("settings")}
         workspaces={workspacesApi.workspaces}
         activeWorkspaceId={workspacesApi.activeId}
         onSelectWorkspace={workspacesApi.setActive}
         onAddWorkspace={openAddWorkspace}
-        canTogglePanel={hasWorkspacePath}
-        panelOpen={panelOpen}
-        onTogglePanel={() => setPanelOpen((v) => !v)}
       />
       <Sidebar
         workspace={workspacesApi.activeWorkspace}
@@ -354,24 +364,35 @@ export function App() {
         onDelete={sessionsApi.deleteSession}
       />
       <main className="main-pane">
+        <Titlebar
+          variant={isSettings ? "settings" : "session"}
+          title={isSettings ? "Settings" : undefined}
+          onBack={isSettings ? () => void onSelectView("chat") : undefined}
+          sessionTitle={sessionTitle}
+          sessionSkill={sessionSkill}
+          sessionStartedAt={sessionStartedAt}
+          sidebarOpen={!sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+          canTogglePanel={hasWorkspacePath && !isSettings}
+          panelOpen={panelOpen}
+          onTogglePanel={() => setPanelOpen((v) => !v)}
+        />
         {isSettings ? (
-          <>
-            <Titlebar title="Settings" onBack={() => void onSelectView("chat")} />
-            <Suspense fallback={<PaneFallback />}>
-              <Settings />
-            </Suspense>
-          </>
+          <Suspense fallback={<PaneFallback />}>
+            <Settings />
+          </Suspense>
         ) : (
           <>
-            <MainDock
-              chatSubtitle={chatSubtitle}
-              openNotes={openNotes}
-              activeId={dockActiveId}
-              onSelectChat={handleSelectChatTab}
-              onSelectNote={handleOpenNote}
-              onCloseNote={handleCloseNote}
-              onDetachNote={handleDetachNote}
-            />
+            {showDock ? (
+              <MainDock
+                openNotes={openNotes}
+                activeId={dockActiveId}
+                onSelectChat={handleSelectChatTab}
+                onSelectNote={handleOpenNote}
+                onCloseNote={handleCloseNote}
+                onDetachNote={handleDetachNote}
+              />
+            ) : null}
             {showNoteEditor && notesApi.activeNote && workspacesApi.activeWorkspace ? (
               <Suspense fallback={<PaneFallback />}>
                 <NoteEditorContainer
@@ -388,6 +409,9 @@ export function App() {
                 setContextResetAt={sessionsApi.setContextResetAt}
                 createSession={sessionsApi.createSession}
                 composerRef={composerRef}
+                onAddContext={
+                  hasWorkspacePath ? () => setPanelOpen(true) : undefined
+                }
               />
             )}
           </>
@@ -396,7 +420,6 @@ export function App() {
       {showPanel && workspacesApi.activeWorkspace ? (
         <WorkspacePanel
           workspace={workspacesApi.activeWorkspace}
-          onClose={() => setPanelOpen(false)}
           notes={notesApi.notes}
           activeNoteId={notesApi.activeId}
           notesLoading={notesApi.loading}
@@ -443,6 +466,9 @@ interface ChatViewProps {
    * workspace files into pending context when the user clicks them in the
    * right sidebar. */
   readonly composerRef?: Ref<ComposerHandle>;
+  /** Reveal the workspace pane (where the user can pick files / notes
+   * to attach). Wired from the composer's "+ Add context" chip. */
+  readonly onAddContext?: () => void;
 }
 
 function PaneFallback() {
@@ -456,6 +482,7 @@ function ChatView({
   setContextResetAt,
   createSession,
   composerRef,
+  onAddContext,
 }: ChatViewProps) {
   const { activeProvider } = useProviders();
   const messages = activeSession?.transcript ?? EMPTY_MESSAGES;
@@ -546,6 +573,7 @@ function ChatView({
         onResetContext={onResetContext}
         onClearTranscript={onClearTranscript}
         workspacePath={activeWorkspace?.path || undefined}
+        onAddContext={onAddContext}
       />
     </>
   );

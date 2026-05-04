@@ -2,32 +2,20 @@ import type { AppView, WorkspaceId, WorkspaceRecord } from "./types";
 
 interface WorkspaceRailProps {
   readonly activeView: AppView;
-  readonly collapsed: boolean;
-  readonly onToggleCollapse: () => void;
   readonly onOpenSettings: () => void;
   readonly workspaces: readonly WorkspaceRecord[];
   readonly activeWorkspaceId: WorkspaceId | undefined;
   readonly onSelectWorkspace: (id: WorkspaceId) => void;
   readonly onAddWorkspace: () => void;
-  /** Whether the right-side files panel toggle is meaningful (i.e. the
-   * active workspace has a folder attached). */
-  readonly canTogglePanel: boolean;
-  readonly panelOpen: boolean;
-  readonly onTogglePanel: () => void;
 }
 
 export function WorkspaceRail({
   activeView,
-  collapsed,
-  onToggleCollapse,
   onOpenSettings,
   workspaces,
   activeWorkspaceId,
   onSelectWorkspace,
   onAddWorkspace,
-  canTogglePanel,
-  panelOpen,
-  onTogglePanel,
 }: WorkspaceRailProps) {
   return (
     <aside className="rail">
@@ -62,36 +50,6 @@ export function WorkspaceRail({
       </button>
 
       <div className="rail-spacer" />
-
-      <button
-        type="button"
-        className="rail-btn rail-btn-icon"
-        onClick={onToggleCollapse}
-        title={collapsed ? "Show sidebar — ⌘B" : "Hide sidebar — ⌘B"}
-        aria-label={collapsed ? "Show sidebar" : "Hide sidebar"}
-      >
-        <PanelLeftIcon />
-        <span className="rail-tooltip">
-          {collapsed ? "Show sidebar" : "Hide sidebar"}
-          <span style={{ opacity: 0.5, marginLeft: 6 }}>⌘B</span>
-        </span>
-      </button>
-
-      {canTogglePanel ? (
-        <button
-          type="button"
-          className="rail-btn rail-btn-icon"
-          data-active={panelOpen}
-          onClick={onTogglePanel}
-          title={panelOpen ? "Hide files panel" : "Show files panel"}
-          aria-label={panelOpen ? "Hide files panel" : "Show files panel"}
-        >
-          <PanelRightIcon />
-          <span className="rail-tooltip">
-            {panelOpen ? "Hide files" : "Show files"}
-          </span>
-        </button>
-      ) : null}
 
       <button
         type="button"
@@ -137,42 +95,6 @@ function PlusIcon() {
       aria-hidden
     >
       <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-function PanelLeftIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d="M9 3v18" />
-    </svg>
-  );
-}
-function PanelRightIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d="M15 3v18" />
     </svg>
   );
 }

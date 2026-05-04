@@ -2,6 +2,24 @@
 // button metrics; stroke widths intentionally vary by icon weight. Kept in
 // one file so the orchestrator doesn't drown in svg markup.
 
+export function PlusIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
 export function HammerIcon() {
   return (
     <svg

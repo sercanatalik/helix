@@ -7,32 +7,63 @@
   border-left: 1px solid var(--border-subtle);
 }
 .panel-header {
-  padding: 10px 12px 8px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.panel-header-row {
+.panel-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  flex-wrap: nowrap;
 }
-.panel-label {
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  color: var(--fg-dim);
-  text-transform: uppercase;
+.panel-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.panel-tab:hover {
+  color: var(--fg);
+  background: var(--bg-elev);
+}
+.panel-tab[data-active="true"] {
+  color: var(--fg);
+  background: var(--bg-elev-2);
+  border-color: var(--border-subtle);
+}
+.panel-tab-count {
   font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  min-width: 18px;
+  text-align: center;
+}
+.panel-tab[data-active="true"] .panel-tab-count {
+  color: var(--fg);
 }
 .panel-header-spacer {
   flex: 1;
 }
 .panel-icon-btn {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius);
   display: grid;
   place-items: center;
   color: var(--fg-dim);
@@ -45,6 +76,33 @@
   background: var(--bg-elev);
   color: var(--fg);
   border-color: var(--border-subtle);
+}
+.panel-footer {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.panel-footer-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  flex-shrink: 0;
+}
+.panel-footer-dot[data-active="true"] {
+  background: var(--success);
+}
+.panel-footer-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .panel-crumb {
   display: inline-flex;

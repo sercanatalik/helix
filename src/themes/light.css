@@ -26,6 +26,10 @@
   --accent-soft: oklch(0.58 var(--accent-c) var(--accent-h) / 0.12);
   --accent-ring: oklch(0.58 var(--accent-c) var(--accent-h) / 0.5);
 
+  --assistant-raw: oklch(0.55 0.08 250);
+  --assistant-soft: oklch(0.55 0.08 250 / 0.1);
+  --assistant-ring: oklch(0.55 0.08 250 / 0.4);
+
   --success: oklch(0.55 0.13 150);
   --danger: oklch(0.55 0.19 25);
   --danger-fg: oklch(0.99 0 0);

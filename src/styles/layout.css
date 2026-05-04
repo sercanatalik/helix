@@ -36,7 +36,9 @@
   border-right: 1px solid var(--border-subtle);
 }
 .rail-drag {
-  height: 26px;
+  /* Match the titlebar height in the main pane so the rail's first item
+   * sits on the same baseline as the brand lockup. */
+  height: 28px;
   width: 100%;
 }
 .rail-spacer {
@@ -118,7 +120,10 @@
   transition: border-right-color 220ms ease;
 }
 .chats-col-drag {
-  height: 26px;
+  /* Reserves vertical space above the workspace title so the macOS
+   * traffic-light region stays draggable, and keeps the column header
+   * in line with the titlebar's brand lockup in the main pane. */
+  height: 28px;
   flex-shrink: 0;
 }
 .chats-header {
@@ -130,14 +135,14 @@
 .workspace-title {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
   padding: 0 4px 2px;
 }
 .workspace-title-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
   color: var(--fg);
 }
@@ -155,16 +160,21 @@
   text-overflow: ellipsis;
   min-width: 0;
 }
-.workspace-title-path {
-  font-size: 10.5px;
-  color: var(--fg-dim);
+.workspace-title-parent {
+  align-self: flex-start;
   font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 1px 6px;
+  letter-spacing: 0.02em;
+  margin-left: 19px;
+  max-width: calc(100% - 19px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-left: 18px;
-  direction: rtl;
-  text-align: left;
 }
 
 .chats-scroll {
@@ -208,45 +218,125 @@
   min-width: 0;
 }
 
+/* ---------- Integrated titlebar (single chrome strip) ----------
+ * Carries the brand lockup, the active session/settings crumb, and the
+ * sidebar/panel toggles. Replaces the old separate titlebar + per-session
+ * header — the strip is now real UI, not a passive label.
+ */
 .titlebar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 18px;
+  gap: 12px;
+  padding: 0 12px;
+  background: var(--bg-rail);
   border-bottom: 1px solid var(--border-subtle);
+  -webkit-app-region: drag;
   flex-shrink: 0;
-  min-height: 56px;
+  min-height: 44px;
 }
-.titlebar-drag {
-  flex: 1;
-  height: 30px;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.titlebar > button,
+.titlebar input,
+.titlebar .session-crumb,
+.titlebar .titlebar-controls,
+.titlebar .titlebar-settings {
+  -webkit-app-region: no-drag;
+}
+.titlebar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
 }
 .titlebar-title {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--fg);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 460px;
 }
-.breadcrumb {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-dim);
+.titlebar-settings {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  white-space: nowrap;
+}
+.titlebar-back {
+  flex-shrink: 0;
+}
+.session-crumb {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   overflow: hidden;
 }
-.breadcrumb-sep {
+.session-crumb-empty {
+  /* Reserve space so the controls don't migrate left when no session
+   * exists yet (empty workspace, fresh boot). */
+  flex: 1;
+}
+.session-crumb-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.session-crumb-skill {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-elev-2);
+  flex-shrink: 0;
+}
+.session-crumb-time {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   color: var(--fg-faint);
+  flex-shrink: 0;
+}
+.titlebar-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.titlebar-icon-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: var(--radius);
+  cursor: pointer;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.titlebar-icon-btn:hover:not(:disabled) {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.titlebar-icon-btn[data-active="true"] {
+  background: var(--bg-elev-2);
+  color: var(--accent-raw);
+  border-color: var(--border-subtle);
+}
+.titlebar-icon-btn[data-empty="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ---------- Main dock (VSCode-style tab strip) ---------- */

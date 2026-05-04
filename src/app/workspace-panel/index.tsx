@@ -11,13 +11,12 @@ import type { TreeEntry } from "../../lib/tauri-api";
 import { ConfirmDialog } from "../confirm-dialog";
 import type { NoteId, NoteRecord, WorkspaceRecord } from "../types";
 import { ContextMenu, type ContextMenuState } from "./context-menu";
-import { CloseIcon, FolderIcon, NewNoteIcon, RefreshIcon } from "./icons";
+import { NewNoteIcon, RefreshIcon } from "./icons";
 import { PanelNotesSection } from "./notes-section";
 import { TreeEditRow, TreeRow } from "./tree-row";
 
 interface WorkspacePanelProps {
   readonly workspace: WorkspaceRecord;
-  readonly onClose?: () => void;
   // Notes integration. The panel is the only surface that exposes the notes
   // list now — that's why these are required, not optional. The parent gates
   // panel visibility on `workspace.path`, so a missing path can't reach here.
@@ -34,6 +33,8 @@ interface WorkspacePanelProps {
    * Folders are still handled internally by the panel (toggle expansion). */
   readonly onSelectFile?: (entry: TreeEntry) => void;
 }
+
+type PanelTab = "files" | "notes";
 
 type LoadState =
   | { kind: "idle" }
@@ -55,7 +56,6 @@ type EditState =
 
 export function WorkspacePanel({
   workspace,
-  onClose,
   notes,
   activeNoteId,
   notesLoading,
@@ -65,6 +65,7 @@ export function WorkspacePanel({
   onOpenNoteWindow,
   onSelectFile,
 }: WorkspacePanelProps) {
+  const [tab, setTab] = useState<PanelTab>("files");
   const [load, setLoad] = useState<LoadState>({ kind: "idle" });
   // Local expand/collapse state, keyed by folder path. Defaults to "open" for
   // the root level (depth 0) so the user sees something on first paint.
@@ -331,47 +332,61 @@ export function WorkspacePanel({
     [workspace.path],
   );
 
+  const fileCount =
+    load.kind === "ok"
+      ? load.entries.filter((e) => e.kind === "file").length
+      : undefined;
+  const watcherActive = load.kind === "ok" && !!workspace.path;
+
   return (
     <aside className="panel">
       <div className="panel-header">
-        <div className="panel-header-row">
-          <span className="panel-label">Workspace</span>
-          <span className="panel-header-spacer" />
+        <div className="panel-tabs" role="tablist" aria-label="Workspace pane">
           <button
             type="button"
-            className="panel-icon-btn"
-            onClick={() => void onCreateNote()}
-            title="New note"
-            aria-label="New note"
+            role="tab"
+            aria-selected={tab === "files"}
+            className="panel-tab"
+            data-active={tab === "files" || undefined}
+            onClick={() => setTab("files")}
           >
-            <NewNoteIcon />
+            Files
+            {fileCount !== undefined ? (
+              <span className="panel-tab-count">{fileCount}</span>
+            ) : null}
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "notes"}
+            className="panel-tab"
+            data-active={tab === "notes" || undefined}
+            onClick={() => setTab("notes")}
+          >
+            Notes
+            <span className="panel-tab-count">{notes.length}</span>
+          </button>
+          <span className="panel-header-spacer" />
+          {tab === "notes" ? (
+            <button
+              type="button"
+              className="panel-icon-btn"
+              onClick={() => void onCreateNote()}
+              title="New note"
+              aria-label="New note"
+            >
+              <NewNoteIcon />
+            </button>
+          ) : null}
           <button
             type="button"
             className="panel-icon-btn"
             onClick={refresh}
-            title="Refresh"
+            title="Refresh — re-scan the workspace folder"
             aria-label="Refresh"
           >
             <RefreshIcon />
           </button>
-          {onClose ? (
-            <button
-              type="button"
-              className="panel-icon-btn"
-              onClick={onClose}
-              title="Hide files panel"
-              aria-label="Hide files panel"
-            >
-              <CloseIcon />
-            </button>
-          ) : null}
-        </div>
-        <div className="panel-header-row">
-          <span className="panel-crumb" title={workspace.path}>
-            <FolderIcon />
-            <span>{workspace.displayName}</span>
-          </span>
         </div>
       </div>
       <div
@@ -387,87 +402,110 @@ export function WorkspacePanel({
             {notice.message}
           </div>
         ) : null}
-        <PanelNotesSection
-          notes={notes}
-          activeId={activeNoteId}
-          loading={notesLoading}
-          onSelect={onSelectNote}
-          onRequestDelete={setPendingDelete}
-          onOpenWindow={onOpenNoteWindow}
+        {tab === "notes" ? (
+          <PanelNotesSection
+            notes={notes}
+            activeId={activeNoteId}
+            loading={notesLoading}
+            onSelect={onSelectNote}
+            onRequestDelete={setPendingDelete}
+            onOpenWindow={onOpenNoteWindow}
+          />
+        ) : null}
+        {tab === "files" ? (
+          load.kind === "loading" ? (
+            <div className="panel-empty">Loading…</div>
+          ) : load.kind === "error" ? (
+            <div className="panel-empty panel-error">{load.message}</div>
+          ) : load.kind === "ok" && load.entries.length === 0 ? (
+            <div className="panel-empty">Empty folder.</div>
+          ) : (
+            <>
+              {/* When the user invoked "New file/folder" from the panel
+                  background, the input row anchors to the workspace root and
+                  renders before everything else. Same shape as the in-tree
+                  variant — only the depth differs. */}
+              {edit?.kind === "new" && edit.parentDir === workspace.path ? (
+                <TreeEditRow
+                  key="__new-root__"
+                  depth={0}
+                  kind={edit.entryKind === "folder" ? "folder" : "file"}
+                  initialValue=""
+                  onCommit={(value) =>
+                    void commitNew(edit.parentDir, value, edit.entryKind)
+                  }
+                  onCancel={cancelEdit}
+                />
+              ) : null}
+              {visibleEntries.map((entry) => {
+                const isRenaming =
+                  edit?.kind === "rename" && edit.entry.path === entry.path;
+                const newChildHere =
+                  edit?.kind === "new" &&
+                  entry.kind === "folder" &&
+                  edit.parentDir === entry.path;
+                return (
+                  <Fragment key={entry.path}>
+                    {isRenaming && edit ? (
+                      <TreeEditRow
+                        depth={entry.depth}
+                        kind={entry.kind}
+                        initialValue={entry.name}
+                        selectStem={entry.kind === "file"}
+                        onCommit={(value) => void commitRename(entry, value)}
+                        onCancel={cancelEdit}
+                      />
+                    ) : (
+                      <TreeRow
+                        entry={entry}
+                        expanded={
+                          entry.kind === "folder"
+                            ? (expansion[entry.path] ?? entry.depth === 0)
+                            : false
+                        }
+                        onToggle={() => toggleFolder(entry.path, entry.depth)}
+                        onSelectFile={onSelectFile}
+                        onContextMenu={(e) => openMenu(e, entry)}
+                      />
+                    )}
+                    {newChildHere && edit ? (
+                      <TreeEditRow
+                        depth={entry.depth + 1}
+                        kind={edit.entryKind === "folder" ? "folder" : "file"}
+                        initialValue=""
+                        onCommit={(value) =>
+                          void commitNew(edit.parentDir, value, edit.entryKind)
+                        }
+                        onCancel={cancelEdit}
+                      />
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </>
+          )
+        ) : null}
+      </div>
+      <div className="panel-footer">
+        <span
+          className="panel-footer-dot"
+          data-active={watcherActive || undefined}
+          aria-hidden
         />
-        <div className="panel-section-label">
-          <span>Files</span>
-        </div>
-        {load.kind === "loading" ? (
-          <div className="panel-empty">Loading…</div>
-        ) : load.kind === "error" ? (
-          <div className="panel-empty panel-error">{load.message}</div>
-        ) : load.kind === "ok" && load.entries.length === 0 ? (
-          <div className="panel-empty">Empty folder.</div>
+        {tab === "files" ? (
+          <span className="panel-footer-text">
+            {fileCount === undefined
+              ? "scanning…"
+              : `${fileCount} ${fileCount === 1 ? "file" : "files"}`}
+            {watcherActive ? " · watching" : ""}
+          </span>
         ) : (
-          <>
-            {/* When the user invoked "New file/folder" from the panel
-                background, the input row anchors to the workspace root and
-                renders before everything else. Same shape as the in-tree
-                variant — only the depth differs. */}
-            {edit?.kind === "new" && edit.parentDir === workspace.path ? (
-              <TreeEditRow
-                key="__new-root__"
-                depth={0}
-                kind={edit.entryKind === "folder" ? "folder" : "file"}
-                initialValue=""
-                onCommit={(value) =>
-                  void commitNew(edit.parentDir, value, edit.entryKind)
-                }
-                onCancel={cancelEdit}
-              />
-            ) : null}
-            {visibleEntries.map((entry) => {
-              const isRenaming =
-                edit?.kind === "rename" && edit.entry.path === entry.path;
-              const newChildHere =
-                edit?.kind === "new" &&
-                entry.kind === "folder" &&
-                edit.parentDir === entry.path;
-              return (
-                <Fragment key={entry.path}>
-                  {isRenaming && edit ? (
-                    <TreeEditRow
-                      depth={entry.depth}
-                      kind={entry.kind}
-                      initialValue={entry.name}
-                      selectStem={entry.kind === "file"}
-                      onCommit={(value) => void commitRename(entry, value)}
-                      onCancel={cancelEdit}
-                    />
-                  ) : (
-                    <TreeRow
-                      entry={entry}
-                      expanded={
-                        entry.kind === "folder"
-                          ? (expansion[entry.path] ?? entry.depth === 0)
-                          : false
-                      }
-                      onToggle={() => toggleFolder(entry.path, entry.depth)}
-                      onSelectFile={onSelectFile}
-                      onContextMenu={(e) => openMenu(e, entry)}
-                    />
-                  )}
-                  {newChildHere && edit ? (
-                    <TreeEditRow
-                      depth={entry.depth + 1}
-                      kind={edit.entryKind === "folder" ? "folder" : "file"}
-                      initialValue=""
-                      onCommit={(value) =>
-                        void commitNew(edit.parentDir, value, edit.entryKind)
-                      }
-                      onCancel={cancelEdit}
-                    />
-                  ) : null}
-                </Fragment>
-              );
-            })}
-          </>
+          <span className="panel-footer-text">
+            {notesLoading
+              ? "scanning…"
+              : `${notes.length} ${notes.length === 1 ? "note" : "notes"}`}
+            {watcherActive ? " · watching" : ""}
+          </span>
         )}
       </div>
       {menu ? (

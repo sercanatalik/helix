@@ -103,34 +103,51 @@ function MessageViewImpl({ message, stale = false }: MessageViewProps) {
   return (
     <div
       className="msg"
+      data-role={message.role}
       data-status={message.status}
       data-stale={stale ? "true" : undefined}
     >
-      <div className="msg-role" data-role={message.role}>
-        {message.role}
+      <div className="msg-avatar" data-role={message.role} aria-hidden>
+        {isAssistant ? "HX" : "ME"}
       </div>
-      <div className="msg-content">
-        {isAssistant && reasoning ? (
-          <ReasoningBlock
-            text={reasoning}
-            streaming={reasoningStreaming}
-            verb={verb}
-          />
-        ) : null}
-        {isAssistant && toolCalls.length > 0 ? (
-          <ToolCallGroupList calls={toolCalls} streaming={streaming} />
-        ) : null}
-        {showStatusLine ? <StreamingStatus verb={verb} /> : null}
-        {isAssistant ? (
-          <Markdown content={message.content} streaming={streaming} />
-        ) : (
-          <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-            {renderUserBody(message.content)}
-          </p>
-        )}
+      <div className="msg-body">
+        <div className="msg-meta">
+          <span className="msg-name">{isAssistant ? "Helix" : "You"}</span>
+          <span className="msg-time">{formatMessageTime(message.createdAt)}</span>
+        </div>
+        <div className="msg-content">
+          {isAssistant && reasoning ? (
+            <ReasoningBlock
+              text={reasoning}
+              streaming={reasoningStreaming}
+              verb={verb}
+            />
+          ) : null}
+          {isAssistant && toolCalls.length > 0 ? (
+            <ToolCallGroupList calls={toolCalls} streaming={streaming} />
+          ) : null}
+          {showStatusLine ? <StreamingStatus verb={verb} /> : null}
+          {isAssistant ? (
+            <Markdown content={message.content} streaming={streaming} />
+          ) : (
+            <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+              {renderUserBody(message.content)}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
+}
+
+function formatMessageTime(iso: string): string {
+  const ts = new Date(iso).getTime();
+  if (Number.isNaN(ts)) return "";
+  return new Date(ts).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 // Match a leading `/skillname` token (word chars + hyphens) optionally
@@ -521,25 +538,64 @@ function ToolRow({ call }: { readonly call: ToolCallRecord }) {
     return "complete";
   }, [call.status, call.isError]);
 
+  const capsuleStatus: "ok" | "run" | "err" =
+    status === "running" ? "run" : status === "error" ? "err" : "ok";
   const argsPreview = useMemo(
     () => previewLine(call.arguments, 100),
     [call.arguments],
   );
+  const argsFull = useMemo(() => formatJsonish(call.arguments), [call.arguments]);
+  const expandable = !!call.arguments && call.arguments.trim().length > 0;
+  const [open, setOpen] = useState(false);
 
   return (
-    <li className="tool-row" data-status={status}>
-      <ToolStatusIcon status={status} />
-      <code className="tool-row-name">{call.toolName}</code>
-      {argsPreview ? (
-        <span className="tool-row-args" title={argsPreview}>
-          ({argsPreview})
-        </span>
+    <div className="tool-cap" data-status={capsuleStatus} role="listitem">
+      <button
+        type="button"
+        className="tool-cap-head"
+        onClick={() => (expandable ? setOpen((v) => !v) : undefined)}
+        aria-expanded={expandable ? open : undefined}
+        data-expandable={expandable || undefined}
+      >
+        <span className="tool-cap-dot" aria-hidden />
+        <code className="tool-cap-tool">{call.toolName}</code>
+        {call.serverName ? (
+          <>
+            <span className="tool-cap-sep" aria-hidden>·</span>
+            <span className="tool-cap-server">{call.serverName}</span>
+          </>
+        ) : null}
+        {argsPreview ? (
+          <span className="tool-cap-args" title={argsPreview}>
+            {argsPreview}
+          </span>
+        ) : (
+          <span className="tool-cap-args" />
+        )}
+        {call.durationMs !== undefined ? (
+          <span className="tool-cap-ms">{formatDuration(call.durationMs)}</span>
+        ) : null}
+        {expandable ? <ChevronIcon open={open} /> : null}
+      </button>
+      {expandable && open ? (
+        <pre className="tool-cap-body">{argsFull}</pre>
       ) : null}
-      {status === "complete" && call.durationMs !== undefined ? (
-        <span className="tool-row-duration">{formatDuration(call.durationMs)}</span>
-      ) : null}
-    </li>
+    </div>
   );
+}
+
+/** Pretty-print a serialized JSON-ish argument blob. Unparseable input
+ * returns as-is so non-JSON tool inputs (raw strings, shell args) still
+ * render legibly inside the expanded capsule. */
+function formatJsonish(raw: string): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return trimmed;
+  }
 }
 
 function ToolStatusIcon({ status }: { readonly status: ToolCallStatus }) {

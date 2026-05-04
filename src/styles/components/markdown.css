@@ -57,6 +57,64 @@
   text-decoration: var(--shiki-dark-text-decoration) !important;
 }
 
+/* ---------- Markdown table card ----------
+ * Wraps each markdown table in a labelled card with a caption row that
+ * shows the row count, then tags numeric columns so CSS can right-align
+ * them. The detection runs in components/markdown.tsx (TableCard) — the
+ * styles below assume `data-numeric-cols="<comma-list>"` on the table. */
+.helix-table-card {
+  margin: 14px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.helix-table-caption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-elev);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+}
+.helix-table-caption-rows {
+  font-feature-settings: "tnum";
+}
+.helix-table-card > table {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+/* Right-align numeric columns. Columns are listed in the table's
+ * `data-numeric-cols` attribute as space-separated zero-based indices —
+ * `~=` matches one whole token at a time so each rule below picks one
+ * column. Twelve rules covers any reasonable financial table; tables wider
+ * than that fall back to the default left-align (still readable). */
+.streamdown-content table[data-numeric-cols~="0"] tr > :nth-child(1),
+.streamdown-content table[data-numeric-cols~="1"] tr > :nth-child(2),
+.streamdown-content table[data-numeric-cols~="2"] tr > :nth-child(3),
+.streamdown-content table[data-numeric-cols~="3"] tr > :nth-child(4),
+.streamdown-content table[data-numeric-cols~="4"] tr > :nth-child(5),
+.streamdown-content table[data-numeric-cols~="5"] tr > :nth-child(6),
+.streamdown-content table[data-numeric-cols~="6"] tr > :nth-child(7),
+.streamdown-content table[data-numeric-cols~="7"] tr > :nth-child(8),
+.streamdown-content table[data-numeric-cols~="8"] tr > :nth-child(9),
+.streamdown-content table[data-numeric-cols~="9"] tr > :nth-child(10),
+.streamdown-content table[data-numeric-cols~="10"] tr > :nth-child(11),
+.streamdown-content table[data-numeric-cols~="11"] tr > :nth-child(12) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
 /* ---------- Markdown tables ----------
  * Themed to match the rest of the app: hairline borders on the
  * `--border-subtle` token, header strip lifted onto `--bg-elev`, accent

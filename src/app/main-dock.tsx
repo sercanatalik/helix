@@ -2,9 +2,6 @@ import type { MouseEvent } from "react";
 import type { NoteId, NoteRecord } from "./types";
 
 interface MainDockProps {
-  /** Subtitle shown next to the Chat tab — e.g. workspace name or session
-   * title. Optional; when omitted only "Chat" renders. */
-  readonly chatSubtitle?: string;
   /** Open note tabs in display order. Already filtered to records that
    * still exist on disk — the dock just renders. */
   readonly openNotes: readonly NoteRecord[];
@@ -19,9 +16,10 @@ interface MainDockProps {
 }
 
 /** VSCode-style tab strip across the top of the main pane. Chat is always
- * the first, pinned tab; everything else is an opened markdown file. */
+ * the first, pinned tab; everything else is an opened markdown file.
+ * Only rendered when at least one note is open — the integrated titlebar
+ * carries the session crumb when chat is the only surface. */
 export function MainDock({
-  chatSubtitle,
   openNotes,
   activeId,
   onSelectChat,
@@ -31,11 +29,7 @@ export function MainDock({
 }: MainDockProps) {
   return (
     <header className="main-dock" role="tablist" aria-label="Open documents">
-      <ChatTab
-        active={activeId === "chat"}
-        subtitle={chatSubtitle}
-        onSelect={onSelectChat}
-      />
+      <ChatTab active={activeId === "chat"} onSelect={onSelectChat} />
       {openNotes.map((note) => (
         <NoteTab
           key={note.id}
@@ -53,11 +47,10 @@ export function MainDock({
 
 interface ChatTabProps {
   readonly active: boolean;
-  readonly subtitle?: string;
   readonly onSelect: () => void;
 }
 
-function ChatTab({ active, subtitle, onSelect }: ChatTabProps) {
+function ChatTab({ active, onSelect }: ChatTabProps) {
   return (
     <button
       type="button"
@@ -65,14 +58,13 @@ function ChatTab({ active, subtitle, onSelect }: ChatTabProps) {
       aria-selected={active}
       className="dock-tab dock-tab-pinned"
       data-active={active || undefined}
-      title={subtitle ? `Chat — ${subtitle}` : "Chat"}
+      title="Chat"
       onClick={onSelect}
     >
       <span className="dock-tab-icon" aria-hidden>
         <ChatIcon />
       </span>
       <span className="dock-tab-label">Chat</span>
-      {subtitle ? <span className="dock-tab-subtle">{subtitle}</span> : null}
     </button>
   );
 }

@@ -27,6 +27,12 @@
   --accent-soft: oklch(0.68 var(--accent-c) var(--accent-h) / 0.14);
   --accent-ring: oklch(0.68 var(--accent-c) var(--accent-h) / 0.45);
 
+  /* Distinct assistant identity color used by the message avatar so user
+   * (accent) and assistant (this hue) read as separate voices. */
+  --assistant-raw: oklch(0.7 0.08 250);
+  --assistant-soft: oklch(0.7 0.08 250 / 0.14);
+  --assistant-ring: oklch(0.7 0.08 250 / 0.45);
+
   --success: oklch(0.72 0.12 150);
   --danger: oklch(0.68 0.17 25);
   --danger-fg: oklch(0.15 0 0);

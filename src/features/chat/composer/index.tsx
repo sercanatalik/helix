@@ -33,7 +33,7 @@ import type {
   TranscriptMessage,
 } from "../../../app/types";
 import { ContextUsageChip } from "./context-usage-chip";
-import { HammerIcon, SendIcon, StopIcon, WrenchIcon } from "./icons";
+import { HammerIcon, PlusIcon, SendIcon, StopIcon, WrenchIcon } from "./icons";
 import { ModelChip } from "./model-chip";
 import {
   buildWorkspaceContext,
@@ -88,6 +88,10 @@ interface ComposerProps {
    * inside it, and surfaced as a system-context entry on each send so the
    * model knows where it is. */
   readonly workspacePath?: string;
+  /** Reveal the workspace pane and put focus on its files section so the
+   * user can pick something to attach. Wired by the parent because panel
+   * visibility lives on the App. */
+  readonly onAddContext?: () => void;
 }
 
 /** Imperative surface the parent (App) reaches into when the user clicks a
@@ -123,6 +127,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     onResetContext,
     onClearTranscript,
     workspacePath,
+    onAddContext,
   },
   ref,
 ) {
@@ -615,6 +620,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             disabled={!anyConnected}
             onClick={togglePopover}
           />
+          {onAddContext ? (
+            <ToolChip
+              icon={<PlusIcon />}
+              label="Add context"
+              tooltip="Attach files, prompts, or resources for the next message"
+              onClick={onAddContext}
+            />
+          ) : null}
+          <span className="composer-tools-spacer" />
           <ContextUsageChip
             messages={messages ?? EMPTY_TRANSCRIPT}
             pendingContext={pendingContext}
@@ -622,7 +636,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             contextResetAt={contextResetAt}
             onReset={onResetContext}
           />
-          <span className="composer-tools-spacer" />
           {provider ? (
             <ModelChip
               activeModel={activeModel}
@@ -715,9 +728,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder={
-              isStreaming
-                ? "Streaming…"
-                : "Message the assistant. Type / for skills and commands."
+              isStreaming ? "Streaming…" : "Ask anything, or / for skills"
             }
             rows={1}
             disabled={disabled && !isStreaming}

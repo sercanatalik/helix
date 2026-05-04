@@ -38,6 +38,10 @@
   --accent-soft: oklch(0.62 var(--accent-c) var(--accent-h) / 0.16);
   --accent-ring: oklch(0.62 var(--accent-c) var(--accent-h) / 0.45);
 
+  --assistant-raw: oklch(0.7 0.08 250);
+  --assistant-soft: oklch(0.7 0.08 250 / 0.14);
+  --assistant-ring: oklch(0.7 0.08 250 / 0.45);
+
   /* Status colors share the accent's chroma so they feel like one family. */
   --success: oklch(0.7 0.13 155);
   /* See meridian-light.css — hue shift (25 → 18) keeps danger distinct from

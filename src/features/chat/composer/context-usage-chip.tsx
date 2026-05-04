@@ -48,13 +48,21 @@ export function ContextUsageChip({
     ? `${formatTokens(used)} / ${formatTokens(window)} tokens (estimate) — click to reset context`
     : `${formatTokens(used)} / ${formatTokens(window)} tokens (estimate)`;
 
+  const inner = (
+    <>
+      <span className="ctx-meter-text">
+        {formatTokens(used)} / {formatTokens(window)}
+      </span>
+      <span className="ctx-meter-bar" aria-hidden>
+        <span className="ctx-meter-fill" style={{ width: `${pct}%` }} />
+      </span>
+    </>
+  );
+
   if (!onReset) {
     return (
-      <span className="context-chip" data-tone={tone} title={title}>
-        <span className="context-chip-bar" aria-hidden>
-          <span className="context-chip-fill" style={{ width: `${pct}%` }} />
-        </span>
-        <span className="context-chip-pct">{pct}%</span>
+      <span className="ctx-meter" data-tone={tone} title={title}>
+        {inner}
       </span>
     );
   }
@@ -62,16 +70,13 @@ export function ContextUsageChip({
   return (
     <button
       type="button"
-      className="context-chip context-chip-reset"
+      className="ctx-meter ctx-meter-reset"
       data-tone={tone}
       title={title}
       aria-label={`Reset context (${pct}% used)`}
       onClick={onReset}
     >
-      <span className="context-chip-bar" aria-hidden>
-        <span className="context-chip-fill" style={{ width: `${pct}%` }} />
-      </span>
-      <span className="context-chip-pct">{pct}%</span>
+      {inner}
     </button>
   );
 }

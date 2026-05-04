@@ -8,7 +8,9 @@ import {
   useState,
   type Ref,
 } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { AddWorkspaceDialog } from "./app/add-workspace-dialog";
+import { ConfirmDialog } from "./app/confirm-dialog";
 import { MainDock } from "./app/main-dock";
 import { WorkspacePanel, type AttachFileResult } from "./app/workspace-panel";
 import { WorkspaceRail } from "./app/workspace-rail";
@@ -62,6 +64,14 @@ export function App() {
   // store, no event bus. Null when the chat view isn't mounted (e.g. a
   // note editor has the main pane).
   const composerRef = useRef<ComposerHandle | null>(null);
+  // Mirror of the absolute paths currently in the Composer's pending
+  // context cart (file kind only). Lifted here so the WorkspacePanel can
+  // tag matching tree rows with an "IN CHAT" pill — the user sees at a
+  // glance which files are about to ride along on the next send. The
+  // Composer pushes via its onPendingContextChange prop.
+  const [attachedFilePaths, setAttachedFilePaths] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   // Per-workspace ordered list of open note tabs in the main dock. The
   // active note id (owned by `useNotes`) decides which of these is focused.
   const [openIdsByWorkspace, setOpenIdsByWorkspace] = useState<
@@ -82,6 +92,67 @@ export function App() {
     },
     [workspacesApi],
   );
+
+  // Workspace right-click menu state. `editing` swaps the AddWorkspaceDialog
+  // into edit mode; `pendingDelete` opens a confirm dialog before dropping
+  // the workspace + its sessions.
+  const [editingWorkspace, setEditingWorkspace] = useState<
+    WorkspaceRecord | null
+  >(null);
+  const [pendingDeleteWorkspace, setPendingDeleteWorkspace] = useState<
+    WorkspaceRecord | null
+  >(null);
+
+  const onConfirmEditWorkspace = useCallback(
+    (name: string, path: string) => {
+      if (!editingWorkspace) return;
+      workspacesApi.renameWorkspace(editingWorkspace.id, name);
+      if (path !== editingWorkspace.path) {
+        workspacesApi.setWorkspacePath(editingWorkspace.id, path);
+      }
+      setEditingWorkspace(null);
+    },
+    [editingWorkspace, workspacesApi],
+  );
+
+  const handleChangeWorkspaceFolder = useCallback(
+    async (workspace: WorkspaceRecord) => {
+      try {
+        const selection = await open({
+          title: "Attach folder",
+          directory: true,
+          multiple: false,
+          defaultPath: workspace.path || undefined,
+        });
+        if (typeof selection === "string") {
+          workspacesApi.setWorkspacePath(workspace.id, selection);
+        }
+      } catch {
+        // Dialog cancellation throws or returns null — bail silently.
+      }
+    },
+    [workspacesApi],
+  );
+
+  const handleDetachWorkspaceFolder = useCallback(
+    (workspace: WorkspaceRecord) => {
+      workspacesApi.setWorkspacePath(workspace.id, "");
+    },
+    [workspacesApi],
+  );
+
+  const handleConfirmDeleteWorkspace = useCallback(() => {
+    const target = pendingDeleteWorkspace;
+    if (!target) return;
+    setPendingDeleteWorkspace(null);
+    sessionsApi.deleteWorkspaceSessions(target.id);
+    setOpenIdsByWorkspace((curr) => {
+      if (!(target.id in curr)) return curr;
+      const { [target.id]: _drop, ...rest } = curr;
+      return rest;
+    });
+    workspacesApi.removeWorkspace(target.id);
+  }, [pendingDeleteWorkspace, sessionsApi, workspacesApi]);
 
   // Notes are workspace-folder-only. Without an attached path the panel is
   // hidden and notes can't be created — same gating as the file tree.
@@ -396,6 +467,10 @@ export function App() {
         activeWorkspaceId={workspacesApi.activeId}
         onSelectWorkspace={workspacesApi.setActive}
         onAddWorkspace={openAddWorkspace}
+        onRequestRename={setEditingWorkspace}
+        onRequestChangeFolder={(ws) => void handleChangeWorkspaceFolder(ws)}
+        onRequestDetachFolder={handleDetachWorkspaceFolder}
+        onRequestDelete={setPendingDeleteWorkspace}
       />
       <Sidebar
         workspace={workspacesApi.activeWorkspace}
@@ -451,6 +526,7 @@ export function App() {
                 setContextResetAt={sessionsApi.setContextResetAt}
                 createSession={sessionsApi.createSession}
                 composerRef={composerRef}
+                onAttachedFilePathsChange={setAttachedFilePaths}
               />
             )}
           </>
@@ -477,12 +553,33 @@ export function App() {
             );
           }}
           onSelectFile={(entry) => handleAttachFileToContext(entry)}
+          attachedFilePaths={attachedFilePaths}
         />
       ) : null}
       {isAddingWorkspace ? (
         <AddWorkspaceDialog
           onClose={() => setIsAddingWorkspace(false)}
-          onAdd={onConfirmAddWorkspace}
+          onSubmit={onConfirmAddWorkspace}
+        />
+      ) : null}
+      {editingWorkspace ? (
+        <AddWorkspaceDialog
+          initial={{
+            name: editingWorkspace.displayName,
+            path: editingWorkspace.path,
+          }}
+          onClose={() => setEditingWorkspace(null)}
+          onSubmit={onConfirmEditWorkspace}
+        />
+      ) : null}
+      {pendingDeleteWorkspace ? (
+        <ConfirmDialog
+          title={`Delete workspace "${pendingDeleteWorkspace.displayName}"?`}
+          description="This removes the workspace and all its chats from this app. Files in the attached folder are not touched."
+          confirmLabel="Delete"
+          destructive
+          onCancel={() => setPendingDeleteWorkspace(null)}
+          onConfirm={handleConfirmDeleteWorkspace}
         />
       ) : null}
     </div>
@@ -505,6 +602,10 @@ interface ChatViewProps {
    * workspace files into pending context when the user clicks them in the
    * right sidebar. */
   readonly composerRef?: Ref<ComposerHandle>;
+  /** Bubble up the absolute paths of file attachments currently in the
+   * composer's pending-context cart so the workspace pane can tag matching
+   * tree rows. */
+  readonly onAttachedFilePathsChange?: (paths: ReadonlySet<string>) => void;
 }
 
 function PaneFallback() {
@@ -518,6 +619,7 @@ function ChatView({
   setContextResetAt,
   createSession,
   composerRef,
+  onAttachedFilePathsChange,
 }: ChatViewProps) {
   const { activeProvider } = useProviders();
   const messages = activeSession?.transcript ?? EMPTY_MESSAGES;
@@ -608,6 +710,18 @@ function ChatView({
         onResetContext={onResetContext}
         onClearTranscript={onClearTranscript}
         workspacePath={activeWorkspace?.path || undefined}
+        onPendingContextChange={(entries) => {
+          // Project to absolute file paths only — that's all the workspace
+          // pane needs to highlight rows. File entry ids are `file:${absPath}`
+          // (set in the Composer's attachWorkspaceFile imperative handle).
+          const paths = new Set<string>();
+          for (const e of entries) {
+            if (e.kind === "file" && e.id.startsWith("file:")) {
+              paths.add(e.id.slice("file:".length));
+            }
+          }
+          onAttachedFilePathsChange?.(paths);
+        }}
       />
     </>
   );

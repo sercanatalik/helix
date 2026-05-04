@@ -16,6 +16,10 @@ interface ToolChipProps {
   /** Override the default `title` string. The MCP chip falls back to a
    * connection-aware default; built-in / future chips can supply their own. */
   readonly tooltip?: string;
+  /** "primary" promotes the chip as the headline action of the row — used
+   * by +Add context per the design spec. Renders with a dashed border + fg
+   * color when not active so it reads as a CTA, not a status indicator. */
+  readonly variant?: "default" | "primary";
 }
 
 export function ToolChip({
@@ -27,6 +31,7 @@ export function ToolChip({
   onClick,
   buttonRef,
   tooltip,
+  variant = "default",
 }: ToolChipProps) {
   const title =
     tooltip ??
@@ -40,6 +45,7 @@ export function ToolChip({
       className="tool-chip"
       data-active={active || undefined}
       data-disabled={disabled || undefined}
+      data-variant={variant === "primary" ? "primary" : undefined}
       disabled={disabled}
       title={title}
       onClick={onClick}

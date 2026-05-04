@@ -16,6 +16,12 @@ export interface UseWorkspacesResult {
   readonly activeWorkspace: WorkspaceRecord | undefined;
   readonly setActive: (id: WorkspaceId) => void;
   readonly addWorkspace: (displayName: string, path?: string) => WorkspaceId;
+  readonly renameWorkspace: (id: WorkspaceId, displayName: string) => void;
+  readonly setWorkspacePath: (id: WorkspaceId, path: string) => void;
+  /** Removes the workspace from the list. The hook does not touch the
+   * caller's session/note storage — orchestrate that cleanup at the call
+   * site so all per-workspace state lands in a single update. */
+  readonly removeWorkspace: (id: WorkspaceId) => void;
 }
 
 function nowIso(): string {
@@ -75,11 +81,41 @@ export function useWorkspaces(): UseWorkspacesResult {
     [],
   );
 
+  const renameWorkspace = useCallback(
+    (id: WorkspaceId, displayName: string) => {
+      const trimmed = displayName.trim();
+      if (!trimmed) return;
+      setWorkspaces((curr) =>
+        curr.map((w) => (w.id === id ? { ...w, displayName: trimmed } : w)),
+      );
+    },
+    [],
+  );
+
+  const setWorkspacePath = useCallback((id: WorkspaceId, path: string) => {
+    setWorkspaces((curr) =>
+      curr.map((w) => (w.id === id ? { ...w, path } : w)),
+    );
+  }, []);
+
+  const removeWorkspace = useCallback((id: WorkspaceId) => {
+    setWorkspaces((curr) => {
+      // Refuse to drop the last workspace — the rest of the app (sidebar,
+      // panel, sessions) assumes at least one exists.
+      if (curr.length <= 1) return curr;
+      return curr.filter((w) => w.id !== id);
+    });
+    setActiveId((curr) => (curr === id ? undefined : curr));
+  }, []);
+
   return {
     workspaces,
     activeId: activeWorkspace?.id,
     activeWorkspace,
     setActive,
     addWorkspace,
+    renameWorkspace,
+    setWorkspacePath,
+    removeWorkspace,
   };
 }

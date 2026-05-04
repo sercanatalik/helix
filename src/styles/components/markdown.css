@@ -140,16 +140,19 @@
   scrollbar-width: thin;
 }
 .streamdown-content table thead {
-  background: var(--bg-elev);
+  background: var(--bg-elev-2);
 }
 .streamdown-content table th {
   text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   font-weight: 600;
-  color: var(--fg);
-  padding: 8px 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: 7px 12px;
   border-bottom: 1px solid var(--border-raw);
   white-space: nowrap;
-  letter-spacing: -0.005em;
 }
 .streamdown-content table thead tr:last-child th {
   /* Subtle accent rule under the header to echo the code-block left

@@ -21,6 +21,11 @@ interface TreeRowProps {
    * pulses the row briefly so the user sees the click landed without
    * having to scan to the composer for the new chip. */
   readonly justAttached?: boolean;
+  /** True when this file is *currently* in the composer's pending context.
+   * Different from `justAttached` (a transient pulse): `attached` is the
+   * persistent state — the row keeps an "IN CHAT" pill and tinted bg
+   * until the user removes the chip. */
+  readonly attached?: boolean;
 }
 
 export function TreeRow({
@@ -31,6 +36,7 @@ export function TreeRow({
   onOpenFile,
   onContextMenu,
   justAttached,
+  attached,
 }: TreeRowProps) {
   const isFolder = entry.kind === "folder";
   const size = formatSize(entry.size);
@@ -61,6 +67,7 @@ export function TreeRow({
       className="tree-row"
       data-kind={entry.kind}
       data-just-attached={justAttached || undefined}
+      data-attached={attached || undefined}
       style={{ paddingLeft: 8 + entry.depth * 12 }}
       title={fileTitle}
       onClick={onClick}
@@ -84,6 +91,11 @@ export function TreeRow({
         )}
       </span>
       <span className="tree-row-name">{entry.name}</span>
+      {attached ? (
+        <span className="tree-row-attached-pill" aria-label="Attached to chat context">
+          IN CHAT
+        </span>
+      ) : null}
       {size ? <span className="tree-row-meta">{size}</span> : null}
     </button>
   );

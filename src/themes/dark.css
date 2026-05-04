@@ -33,6 +33,11 @@
   --assistant-soft: oklch(0.7 0.08 250 / 0.14);
   --assistant-ring: oklch(0.7 0.08 250 / 0.45);
 
+  /* Skills get their own indigo/violet — see light.css for rationale. */
+  --skill-raw: oklch(0.72 0.14 270);
+  --skill-soft: oklch(0.72 0.14 270 / 0.18);
+  --skill-ring: oklch(0.72 0.14 270 / 0.4);
+
   --success: oklch(0.72 0.12 150);
   --danger: oklch(0.68 0.17 25);
   --danger-fg: oklch(0.15 0 0);

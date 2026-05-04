@@ -37,6 +37,10 @@ interface WorkspacePanelProps {
   readonly onSelectFile?: (
     entry: TreeEntry,
   ) => Promise<AttachFileResult> | AttachFileResult | void;
+  /** Absolute paths of files currently attached to the composer's pending
+   * context. Tree rows whose entry path matches get an "IN CHAT" pill so
+   * the user sees what's about to ride along on the next send. */
+  readonly attachedFilePaths?: ReadonlySet<string>;
 }
 
 type PanelTab = "files" | "notes";
@@ -78,6 +82,7 @@ export function WorkspacePanel({
   onDeleteNote,
   onOpenNoteWindow,
   onSelectFile,
+  attachedFilePaths,
 }: WorkspacePanelProps) {
   const [tab, setTab] = useState<PanelTab>("files");
   // Path of a row that was just clicked to attach. Cleared after ~1.4s so
@@ -609,6 +614,10 @@ export function WorkspacePanel({
                         onOpenFile={handleOpenFile}
                         onContextMenu={(e) => openMenu(e, entry)}
                         justAttached={justAttachedPath === entry.path}
+                        attached={
+                          entry.kind === "file" &&
+                          (attachedFilePaths?.has(entry.path) ?? false)
+                        }
                       />
                     )}
                     {newChildHere && edit ? (

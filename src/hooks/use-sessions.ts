@@ -36,6 +36,10 @@ export interface UseSessionsResult {
     id: SessionId,
     timestamp: Timestamp | undefined,
   ) => void;
+  /** Drop every session belonging to the given workspace. Called when the
+   * workspace itself is removed so its chats don't linger in storage as
+   * orphans tied to an id nothing renders anymore. */
+  readonly deleteWorkspaceSessions: (workspaceId: WorkspaceId) => void;
 }
 
 function nowIso(): string {
@@ -158,6 +162,14 @@ export function useSessions(
     [],
   );
 
+  const deleteWorkspaceSessions = useCallback((wsId: WorkspaceId) => {
+    setAllSessions((curr) => curr.filter((s) => s.workspaceId !== wsId));
+    // The activeSession memo falls back to the most recent session in the
+    // new active workspace when the pinned id no longer resolves, so we
+    // don't need to clear `activeId` here — the persistence effect saves
+    // the resolved id, not the raw state.
+  }, []);
+
   return {
     sessions,
     activeId: activeSession?.id,
@@ -167,5 +179,6 @@ export function useSessions(
     deleteSession,
     setMessages,
     setContextResetAt,
+    deleteWorkspaceSessions,
   };
 }

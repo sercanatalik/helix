@@ -4,12 +4,21 @@ import { Button } from "../components/ui";
 
 interface AddWorkspaceDialogProps {
   readonly onClose: () => void;
-  readonly onAdd: (name: string, path: string) => void;
+  readonly onSubmit: (name: string, path: string) => void;
+  /** When provided, dialog is in edit mode — fields pre-fill from `initial`,
+   * the title flips to "Edit workspace", and the primary button reads
+   * "Save". Omitted means add mode (the original behaviour). */
+  readonly initial?: { readonly name: string; readonly path: string };
 }
 
-export function AddWorkspaceDialog({ onClose, onAdd }: AddWorkspaceDialogProps) {
-  const [name, setName] = useState("");
-  const [path, setPath] = useState("");
+export function AddWorkspaceDialog({
+  onClose,
+  onSubmit,
+  initial,
+}: AddWorkspaceDialogProps) {
+  const isEdit = !!initial;
+  const [name, setName] = useState(initial?.name ?? "");
+  const [path, setPath] = useState(initial?.path ?? "");
   const [picking, setPicking] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -49,11 +58,17 @@ export function AddWorkspaceDialog({ onClose, onAdd }: AddWorkspaceDialogProps) 
     }
   }
 
+  // Creating a workspace requires a folder — the file tree, notes, and
+  // skills system all key off it, and a folder-less workspace ends up as a
+  // dead shell on first use. Edit mode skips this check so existing
+  // workspaces can still be detached from a folder via the rail menu.
+  const folderRequired = !isEdit;
+  const canSubmit = !!name.trim() && (!folderRequired || !!path);
+
   function submit(e: FormEvent) {
     e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    onAdd(trimmed, path);
+    if (!canSubmit) return;
+    onSubmit(name.trim(), path);
   }
 
   return (
@@ -65,14 +80,17 @@ export function AddWorkspaceDialog({ onClose, onAdd }: AddWorkspaceDialogProps) 
       <form
         className="dialog-card"
         role="dialog"
-        aria-label="Add workspace"
+        aria-label={isEdit ? "Edit workspace" : "Add workspace"}
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
       >
-        <h2 className="dialog-title">Add workspace</h2>
+        <h2 className="dialog-title">
+          {isEdit ? "Edit workspace" : "Add workspace"}
+        </h2>
         <p className="dialog-desc">
-          Give the workspace a short name. Optionally attach a folder so its
-          file tree shows up on the right.
+          {isEdit
+            ? "Give the workspace a short name. Optionally attach a folder so its file tree shows up on the right."
+            : "Give the workspace a short name and pick the folder it should anchor to."}
         </p>
         <input
           ref={inputRef}
@@ -99,7 +117,9 @@ export function AddWorkspaceDialog({ onClose, onAdd }: AddWorkspaceDialogProps) 
               {path}
             </span>
           ) : (
-            <span className="dialog-folder-hint">Optional</span>
+            <span className="dialog-folder-hint">
+              {folderRequired ? "Required" : "Optional"}
+            </span>
           )}
         </div>
 
@@ -107,8 +127,8 @@ export function AddWorkspaceDialog({ onClose, onAdd }: AddWorkspaceDialogProps) 
           <Button variant="ghost" size="lg" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" size="lg" disabled={!name.trim()}>
-            Add
+          <Button type="submit" size="lg" disabled={!canSubmit}>
+            {isEdit ? "Save" : "Add"}
           </Button>
         </div>
       </form>

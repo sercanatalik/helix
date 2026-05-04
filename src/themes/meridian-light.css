@@ -37,6 +37,10 @@
   --assistant-soft: oklch(0.55 0.08 250 / 0.1);
   --assistant-ring: oklch(0.55 0.08 250 / 0.4);
 
+  --skill-raw: oklch(0.5 0.16 270);
+  --skill-soft: oklch(0.5 0.16 270 / 0.1);
+  --skill-ring: oklch(0.5 0.16 270 / 0.35);
+
   --success: oklch(0.5 0.13 155);
   /* Shifted danger from hue 25 → 18 so destructive actions read as a different
      color from the crimson brand accent (which is also ~25). Without this the

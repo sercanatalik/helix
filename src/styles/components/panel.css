@@ -198,6 +198,30 @@
   color: var(--fg);
   font-weight: 500;
 }
+/* Persistent state for files currently in the composer's pending context.
+ * Soft accent tint + leading rule echoes the pulse from
+ * `data-just-attached` but without the animation — the row stays lit
+ * until the user removes the attachment from the composer. */
+.tree-row[data-attached] {
+  background: color-mix(in oklab, var(--accent-soft) 60%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent-ring);
+}
+.tree-row[data-attached]:hover {
+  background: var(--accent-soft);
+}
+.tree-row-attached-pill {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--accent-raw);
+  border: 1px solid var(--accent-ring);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
 .tree-row-icon {
   display: grid;
   place-items: center;

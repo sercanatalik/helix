@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { Button, Kbd } from "../../../components/ui";
 import { BuiltinPalette } from "../builtin-palette";
@@ -46,6 +47,7 @@ import { SystemPromptPopover } from "./system-prompt-popover";
 import {
   buildSkillContext,
   EMPTY_SLASH_ITEMS,
+  findSkillMentions,
   parseSlash,
   SkillsSlashMenu,
   type SlashItem,
@@ -90,6 +92,14 @@ interface ComposerProps {
    * inside it, and surfaced as a system-context entry on each send so the
    * model knows where it is. */
   readonly workspacePath?: string;
+  /** Notify the parent when the pending-context cart changes. The
+   * workspace pane uses this to mirror "which files are currently
+   * attached" so it can render an IN-CHAT pill on the matching tree
+   * rows. Fires with the full list on every change; the receiver is
+   * expected to derive whatever subset it cares about. */
+  readonly onPendingContextChange?: (
+    entries: readonly PendingContextEntry[],
+  ) => void;
 }
 
 /** Imperative surface the parent (App) reaches into when the user clicks a
@@ -125,10 +135,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     onResetContext,
     onClearTranscript,
     workspacePath,
+    onPendingContextChange,
   },
   ref,
 ) {
   const [text, setText] = useState("");
+  // Caret position drives the slash-menu's "what token is being edited"
+  // logic. Tracked separately from `text` because selection moves don't
+  // change the value but do change which token is active.
+  const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState<boolean>(false);
   const [builtinOpen, setBuiltinOpen] = useState<boolean>(false);
   const [modelMenuOpen, setModelMenuOpen] = useState<boolean>(false);
@@ -158,6 +173,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     readonly PendingContextEntry[]
   >([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const mcpTriggerRef = useRef<HTMLButtonElement>(null);
   const mcpPopoverRef = useRef<HTMLDivElement>(null);
   const builtinTriggerRef = useRef<HTMLButtonElement>(null);
@@ -178,7 +194,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // textarea opens with `/` so they can pick an entry without typing
   // the full name. `null` means no menu.
   const slash = useMemo<SlashState | null>(
-    () => parseSlash(text, skills, BUILTIN_SLASH_COMMANDS),
+    () => parseSlash(text, caret, skills, BUILTIN_SLASH_COMMANDS),
+    [text, caret, skills],
+  );
+  // Resolved skill mentions for the highlight overlay. Only mentions that
+  // actually match a loaded skill get a pill — typos and unknown names
+  // render as plain text so the user sees they didn't land on a skill.
+  const skillMentions = useMemo(
+    () => findSkillMentions(text, skills),
     [text, skills],
   );
   // Highlight index for keyboard navigation within the slash popover.
@@ -262,6 +285,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
    * body is only injected when the user explicitly invokes one with `/`. */
   const discoverableSkills = useMemo(
     () => skills.filter((s) => !s.disableModelInvocation && !s.error),
+    [skills],
+  );
+  // Count for the empty-composer hint ("Type / to run a skill (N available)").
+  // Mirrors the picker's filter so the surfaced number matches what the user
+  // will see when they hit `/`.
+  const invocableSkillCount = useMemo(
+    () => skills.filter((s) => !s.error && s.userInvocable).length,
     [skills],
   );
 
@@ -361,6 +391,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const removePendingContext = useCallback((id: string) => {
     setPendingContext((prev) => prev.filter((p) => p.id !== id));
   }, []);
+
+  // Mirror pendingContext upward for the workspace pane's IN-CHAT pill.
+  // Cheap to fire on every change — receivers only project the file
+  // entries they care about.
+  useEffect(() => {
+    onPendingContextChange?.(pendingContext);
+  }, [pendingContext, onPendingContextChange]);
 
   // Imperative handle for the workspace panel: clicking a file there pushes
   // it into pending context as if the model had called `read_file`. The
@@ -575,25 +612,37 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     onSend(userText, extras);
   }
 
-  /** Apply an entry the user picked from the slash popover. Skills get
-   * a trailing space so the user can immediately type arguments — same
-   * UX shape as Claude Code. Built-in commands take no args, so we omit
-   * the space and the user just hits Enter to fire them. */
-  const onPickSlashItem = useCallback((item: SlashItem) => {
-    const next =
-      item.kind === "skill"
-        ? `/${item.skill.name} `
-        : `/${item.command.name}`;
-    setText(next);
-    setSlashHighlight(0);
-    // Defer focus so the textarea picks up the new value first.
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.focus();
-      ta.setSelectionRange(next.length, next.length);
-    });
-  }, []);
+  /** Apply an entry the user picked from the slash popover. Splices into
+   * the active slash token (so mid-message picks don't blow away the
+   * surrounding text), then drops the caret right after the inserted
+   * name. Skills get a trailing space so the user can keep typing prose
+   * or another `/skill`; built-in commands take no args, so we omit the
+   * space and the user just hits Enter to fire them. */
+  const onPickSlashItem = useCallback(
+    (item: SlashItem) => {
+      const insertion =
+        item.kind === "skill"
+          ? `/${item.skill.name} `
+          : `/${item.command.name}`;
+      // Fall back to "replace whole text" if we somehow don't have an
+      // active token — keeps the menu pickable even if `slash` is stale.
+      const start = slash?.tokenStart ?? 0;
+      const end = slash?.tokenEnd ?? text.length;
+      const next = text.slice(0, start) + insertion + text.slice(end);
+      const nextCaret = start + insertion.length;
+      setText(next);
+      setCaret(nextCaret);
+      setSlashHighlight(0);
+      // Defer focus so the textarea picks up the new value first.
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        ta.setSelectionRange(nextCaret, nextCaret);
+      });
+    },
+    [slash, text],
+  );
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // Slash menu navigation takes priority when it's open.
@@ -690,6 +739,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               systemPrompt.trim().length > 0 ||
               pendingContext.length > 0
             }
+            variant="primary"
             tooltip={
               pendingContext.length > 0 || systemPrompt.trim().length > 0
                 ? "View, edit, or add context for the next message"
@@ -768,17 +818,45 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               onPick={onPickSlashItem}
             />
           ) : null}
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder={
-              isStreaming ? "Streaming…" : "Ask anything, or / for skills"
-            }
-            rows={1}
-            disabled={disabled && !isStreaming}
-          />
+          <div className="composer-textarea-wrap">
+            <div
+              ref={overlayRef}
+              className="composer-textarea-overlay"
+              aria-hidden
+            >
+              {renderOverlaySegments(text, skillMentions)}
+            </div>
+            {text.length === 0 && !isStreaming ? (
+              <div className="composer-empty-hint" aria-hidden>
+                <span className="composer-empty-hint-line">Ask anything…</span>
+                <span className="composer-empty-hint-sub">
+                  Type <span className="composer-empty-hint-key">/</span> to run a skill
+                  {invocableSkillCount > 0
+                    ? ` (${invocableSkillCount} available)`
+                    : ""}
+                </span>
+              </div>
+            ) : null}
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                setCaret(e.target.selectionStart);
+              }}
+              onKeyDown={onKeyDown}
+              onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
+              onClick={(e) => setCaret(e.currentTarget.selectionStart)}
+              onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+              onScroll={(e) => {
+                const el = overlayRef.current;
+                if (el) el.scrollTop = e.currentTarget.scrollTop;
+              }}
+              placeholder={isStreaming ? "Streaming…" : ""}
+              rows={1}
+              disabled={disabled && !isStreaming}
+            />
+          </div>
           <div className="composer-toolbar">
             <div className="composer-hint">
               <span>
@@ -786,9 +864,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               </span>
               <span>
                 <Kbd>⇧</Kbd>+<Kbd>↵</Kbd> newline
-              </span>
-              <span>
-                <Kbd>/</Kbd> skills
               </span>
             </div>
             {isStreaming && onStop ? (
@@ -808,6 +883,42 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     </div>
   );
 });
+
+/* ---- Highlight overlay ------------------------------------------------ */
+
+/** Build the transparent-text mirror that sits behind the textarea and
+ * paints a colored pill behind every recognised `/skill-name`. The
+ * mirror's text itself is invisible (color: transparent in CSS) so the
+ * textarea on top stays the source of truth for what the user reads;
+ * only the pill backgrounds show through. A trailing `\n` keeps the
+ * mirror's height in sync when the user ends with a newline (otherwise
+ * the last empty line collapses and the overlay shifts). */
+function renderOverlaySegments(
+  text: string,
+  mentions: readonly { start: number; end: number; skill: { name: string } }[],
+) {
+  if (mentions.length === 0) {
+    return <>{text + "\n"}</>;
+  }
+  const out: ReactNode[] = [];
+  let cursor = 0;
+  mentions.forEach((m, i) => {
+    if (m.start > cursor) {
+      out.push(text.slice(cursor, m.start));
+    }
+    out.push(
+      <mark className="composer-skill-mark" key={`skill-${i}-${m.start}`}>
+        {text.slice(m.start, m.end)}
+      </mark>,
+    );
+    cursor = m.end;
+  });
+  if (cursor < text.length) {
+    out.push(text.slice(cursor));
+  }
+  out.push("\n");
+  return <>{out}</>;
+}
 
 /* ---- Pending-context chip --------------------------------------------- */
 

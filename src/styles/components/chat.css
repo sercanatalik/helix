@@ -121,6 +121,18 @@
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* Primary variant — used by +Add context. Dashed border + fg color reads
+ * as a CTA when nothing is attached, then drops back to the standard
+ * active treatment once the user has added something. */
+.tool-chip[data-variant="primary"]:not([data-active="true"]) {
+  border-style: dashed;
+  border-color: var(--border-raw);
+  color: var(--fg);
+}
+.tool-chip[data-variant="primary"]:not([data-active="true"]):hover {
+  border-color: var(--accent-ring);
+  background: var(--bg-elev-2);
+}
 .tool-chip-icon {
   display: inline-flex;
   align-items: center;
@@ -967,15 +979,22 @@ button.mcp-tool-chip:disabled {
   color: var(--fg);
 }
 
-/* Highlight `/skillname` at the start of a sent user message so the
- * command portion stands out from any args that follow. */
-.msg-slash-token {
+/* Canonical `/skill` chip. Reused everywhere a slash invocation appears:
+ * inside sent user messages (.msg-slash-token), behind the composer
+ * textarea overlay (.composer-skill-mark), and anywhere a skill name
+ * needs to read as one cohesive token. Indigo via --skill-* so it
+ * doesn't compete with --accent-* (primary actions) or --danger
+ * (destructive). */
+.skill-chip,
+.msg-slash-token,
+.composer-skill-mark {
   font-family: var(--font-mono);
   font-size: 0.92em;
   padding: 1px 6px;
   border-radius: 4px;
-  background: var(--accent-soft);
-  color: var(--accent-raw);
+  background: var(--skill-soft);
+  color: var(--skill-raw);
+  border: 1px solid var(--skill-ring);
 }
 
 /* iOS-style toggle pill */
@@ -1038,6 +1057,18 @@ button.mcp-tool-chip:disabled {
 .model-chip-wrap {
   position: relative;
   display: inline-flex;
+}
+/* Quieter than a chip — flat text + chevron when closed, lifts to the
+ * standard chip treatment only when the menu is open. Keeps the model
+ * picker as a status readout, not another button competing with the
+ * primary +Add context CTA in the same row. */
+.tool-chip.model-chip:not([data-active="true"]) {
+  border-color: transparent;
+  background: transparent;
+}
+.tool-chip.model-chip:not([data-active="true"]):hover {
+  border-color: var(--border-subtle);
+  background: var(--bg-elev);
 }
 .model-chip .model-chip-label {
   font-family: var(--font-mono);
@@ -1390,6 +1421,10 @@ button.mcp-tool-chip:disabled {
   border-color: var(--accent-ring);
   box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-soft);
 }
+.composer-textarea-wrap {
+  position: relative;
+  width: 100%;
+}
 .composer-card textarea {
   width: 100%;
   min-height: 60px;
@@ -1403,9 +1438,72 @@ button.mcp-tool-chip:disabled {
   font-size: 14px;
   line-height: 1.55;
   font-family: var(--font-sans);
+  position: relative;
+  z-index: 1;
 }
 .composer-card textarea::placeholder {
   color: var(--fg-dim);
+}
+/* Mirror that paints skill-mention pills behind the textarea. Same box
+ * model and typography so character positions line up exactly with the
+ * textarea's caret / selection. Text is transparent — the textarea on
+ * top is the visible source — but `<mark>` segments paint a pill
+ * background that shows through. */
+.composer-textarea-overlay {
+  position: absolute;
+  inset: 0;
+  padding: 14px 14px 2px;
+  font-size: 14px;
+  line-height: 1.55;
+  font-family: var(--font-sans);
+  color: transparent;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+/* Overlay variant of the skill chip — the textarea on top still owns the
+ * visible glyphs, so the mark hides its own text and leans on the chip
+ * background to highlight the underlying token. Negative margin keeps the
+ * pill snug to the slash without nudging surrounding characters. */
+.composer-skill-mark {
+  color: transparent;
+  padding: 1px 2px;
+  margin: 0 -2px;
+  border: none;
+  box-shadow: 0 0 0 1px var(--skill-ring) inset;
+}
+/* Two-line affordance shown when the textarea is empty. Lives in the
+ * overlay layer (transparent textarea on top still owns input/caret).
+ * Teaches the `/` picker without burying it in the keyboard-hint footer. */
+.composer-empty-hint {
+  position: absolute;
+  inset: 14px 14px auto 14px;
+  pointer-events: none;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  user-select: none;
+}
+.composer-empty-hint-line {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--fg-dim);
+}
+.composer-empty-hint-sub {
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.composer-empty-hint-key {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
 }
 .composer-toolbar {
   display: flex;
@@ -1878,5 +1976,11 @@ button.mcp-tool-chip:disabled {
 .mcp-menu-item[data-active] {
   background: var(--bg);
   border-radius: 6px;
+}
+/* Skill rows in the picker tint with --skill-soft when highlighted so the
+ * picker reads as the same family as the chip it inserts. Built-in
+ * commands (/clear, /write-to-workspace) keep the neutral hover. */
+.mcp-menu-item[data-active] .mcp-menu-item-name {
+  color: var(--skill-raw);
 }
 

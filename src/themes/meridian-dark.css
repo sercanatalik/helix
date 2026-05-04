@@ -42,6 +42,10 @@
   --assistant-soft: oklch(0.7 0.08 250 / 0.14);
   --assistant-ring: oklch(0.7 0.08 250 / 0.45);
 
+  --skill-raw: oklch(0.72 0.14 270);
+  --skill-soft: oklch(0.72 0.14 270 / 0.18);
+  --skill-ring: oklch(0.72 0.14 270 / 0.4);
+
   /* Status colors share the accent's chroma so they feel like one family. */
   --success: oklch(0.7 0.13 155);
   /* See meridian-light.css — hue shift (25 → 18) keeps danger distinct from

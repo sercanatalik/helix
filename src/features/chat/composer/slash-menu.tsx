@@ -20,63 +20,152 @@ export interface SlashState {
   /** Filtered candidates, in display order. Built-in commands first
    * (short, well-known list) so they're predictable to reach. */
   readonly candidates: readonly SlashItem[];
+  /** Character range of the active token (the `/` and what follows it
+   * up to the caret-side word boundary). Used by the composer to splice
+   * a picked item into the existing text instead of replacing all of it. */
+  readonly tokenStart: number;
+  readonly tokenEnd: number;
+  /** True when the active token is the very first thing in the textarea.
+   * Built-in commands (`/clear`, `/write-to-workspace`) only mean anything
+   * as the entire message, so the menu hides them when the user is mid-
+   * message. */
+  readonly atStart: boolean;
 }
 
-/** Detect whether the textarea contents start with a slash command and,
- * if so, filter the candidate list against the partial name. The menu
- * only appears while the user is still typing the name (no space yet)
- * — once they hit space they're in "arguments" territory and we hide
- * it. Built-in commands and skills share one filtered list. */
+/** Locate the slash-token under the caret, if any. A "slash token" is
+ * `/` at the very start of the text or immediately after whitespace,
+ * followed by zero or more non-whitespace characters. The caret must
+ * sit inside that token (between the `/` and the next whitespace) for
+ * the menu to be considered active — once the user types past it, the
+ * token is finalized and the menu closes. */
+function findActiveSlashToken(
+  text: string,
+  caret: number,
+): { start: number; end: number } | null {
+  // Walk backwards from the caret to find the nearest `/` that opens a
+  // token (preceded by start-of-text or whitespace, and with no
+  // intervening whitespace between it and the caret).
+  let start = -1;
+  for (let i = caret - 1; i >= 0; i--) {
+    const ch = text[i] ?? "";
+    if (/\s/.test(ch)) return null;
+    if (ch === "/") {
+      const prev = i === 0 ? "" : text[i - 1] ?? "";
+      if (i === 0 || /\s/.test(prev)) {
+        start = i;
+        break;
+      }
+      // A `/` that isn't at a word boundary (e.g. inside a URL) doesn't
+      // open a token.
+      return null;
+    }
+  }
+  if (start === -1) return null;
+  // Extend forward from the caret to the next whitespace to capture the
+  // full token range — needed so we know what to splice when the user
+  // picks a candidate.
+  let end = caret;
+  while (end < text.length && !/\s/.test(text[end] ?? "")) end++;
+  return { start, end };
+}
+
+/** Detect whether the active slash-token under the caret should pop the
+ * menu, and if so, build the candidate list. Skills can be invoked
+ * anywhere in the message (mid-sentence is fine — multiple in one
+ * message is fine), but built-in commands (`/clear`, etc.) are only
+ * surfaced when the token is at position 0 since they take over the
+ * whole message. */
 export function parseSlash(
   text: string,
+  caret: number,
   skills: readonly Skill[],
   commands: readonly BuiltinSlashCommand[],
 ): SlashState | null {
-  if (!text.startsWith("/")) return null;
-  // Hide once the user typed a space — they're entering arguments now.
-  const sliced = text.slice(1);
-  if (/\s/.test(sliced)) return null;
-  const query = sliced.toLowerCase();
+  const token = findActiveSlashToken(text, caret);
+  if (!token) return null;
+  const partial = text.slice(token.start + 1, token.end);
+  const query = partial.toLowerCase();
+  const atStart = token.start === 0;
   // Prefix matches rank above substring matches so the auto-highlighted
   // top item is the natural completion of what the user just typed
   // (`/cle` → `/clear` at top, not some skill containing "cle" mid-name).
   // Stable sort preserves source order within each rank.
   const rank = (name: string) =>
     name.toLowerCase().startsWith(query) ? 0 : 1;
-  const builtinCandidates = commands
-    .filter((c) => c.name.toLowerCase().includes(query))
-    .slice()
-    .sort((a, b) => rank(a.name) - rank(b.name))
-    .map<SlashItem>((command) => ({ kind: "builtin", command }));
+  const builtinCandidates = atStart
+    ? commands
+        .filter((c) => c.name.toLowerCase().includes(query))
+        .slice()
+        .sort((a, b) => rank(a.name) - rank(b.name))
+        .map<SlashItem>((command) => ({ kind: "builtin", command }))
+    : [];
   const skillCandidates = skills
     .filter((s) => !s.error && s.userInvocable)
     .filter((s) => s.name.toLowerCase().includes(query))
     .slice()
     .sort((a, b) => rank(a.name) - rank(b.name))
     .map<SlashItem>((skill) => ({ kind: "skill", skill }));
-  return { query, candidates: [...builtinCandidates, ...skillCandidates] };
+  return {
+    query,
+    candidates: [...builtinCandidates, ...skillCandidates],
+    tokenStart: token.start,
+    tokenEnd: token.end,
+    atStart,
+  };
 }
 
-/** Match `/skill-name [args]` against the loaded skill list. Returns the
- * resolved skill plus the raw argument string (everything after the first
- * whitespace) when one matches; otherwise `null`. Names match case-
- * insensitively but Claude Code's spec restricts skill names to lowercase
- * anyway, so this is mostly defensive. */
-function matchSlashInvocation(
+export interface SkillMention {
+  readonly skill: Skill;
+  readonly args: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Find every `/skill-name` mention in the text that resolves to a real
+ * skill. Mentions are at word boundaries (start-of-text or after
+ * whitespace). The single-mention-at-start case grabs everything after
+ * the skill name as `args` for backward compatibility with the original
+ * `/skill arg1 arg2` UX; mid-message mentions get empty args because
+ * there's no clean delimiter when more skills could follow. */
+export function findSkillMentions(
   text: string,
   skills: readonly Skill[],
-): { skill: Skill; args: string } | null {
-  if (!text.startsWith("/")) return null;
-  const body = text.slice(1);
-  const space = body.search(/\s/);
-  const name = (space === -1 ? body : body.slice(0, space)).toLowerCase();
-  if (!name) return null;
-  const args = space === -1 ? "" : body.slice(space + 1);
-  const skill = skills.find(
-    (s) => !s.error && s.userInvocable && s.name.toLowerCase() === name,
-  );
-  if (!skill) return null;
-  return { skill, args };
+): readonly SkillMention[] {
+  const skillByName = new Map<string, Skill>();
+  for (const s of skills) {
+    if (s.error || !s.userInvocable) continue;
+    skillByName.set(s.name.toLowerCase(), s);
+  }
+  if (skillByName.size === 0) return [];
+
+  const mentions: SkillMention[] = [];
+  // /name where name is non-empty and only contains [\w-] (Claude Code
+  // restricts skill names to lowercase letters / digits / hyphens).
+  const re = /(^|\s)\/([A-Za-z0-9_-]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const lead = match[1] ?? "";
+    const rawName = match[2] ?? "";
+    const skill = skillByName.get(rawName.toLowerCase());
+    if (!skill) continue;
+    const start = match.index + lead.length;
+    const end = start + 1 + rawName.length;
+    mentions.push({ skill, args: "", start, end });
+  }
+
+  // Backward-compat: when the user typed exactly one mention, at the
+  // start of the message, with text after it, treat the trailing text as
+  // `$ARGUMENTS` for the skill body. Multi-mention messages skip this —
+  // there's no unambiguous way to assign args.
+  const only = mentions[0];
+  if (mentions.length === 1 && only && only.start === 0) {
+    const tail = text.slice(only.end);
+    const argsMatch = tail.match(/^\s+([\s\S]+)$/);
+    if (argsMatch && argsMatch[1]) {
+      return [{ ...only, args: argsMatch[1] }];
+    }
+  }
+  return mentions;
 }
 
 /** Build the system messages helix prepends for skill awareness:
@@ -84,9 +173,9 @@ function matchSlashInvocation(
  * - Always include a one-shot "available skills" listing so the model can
  *   auto-discover relevant skills mid-conversation (parity with how
  *   Claude Desktop pre-loads `name + description` for every skill).
- * - When the user typed `/skill-name args`, additionally include the
- *   rendered SKILL.md body as a system message so the model has the full
- *   instructions for this turn.
+ * - For each `/skill-name` mention in the user's text, additionally
+ *   include the rendered SKILL.md body as a system message so the model
+ *   has the full instructions for this turn.
  *
  * The user's transcript text is left untouched — they see what they typed,
  * the model sees the skill body in addition. */
@@ -117,10 +206,15 @@ export async function buildSkillContext(
     );
   }
 
-  const invocation = matchSlashInvocation(userText, skills);
-  if (invocation) {
+  const mentions = findSkillMentions(userText, skills);
+  // De-dupe by skill id — if the user types the same skill twice in one
+  // message, the body still only needs to ride along once.
+  const seen = new Set<string>();
+  for (const mention of mentions) {
+    if (seen.has(mention.skill.id)) continue;
+    seen.add(mention.skill.id);
     try {
-      const body = await render(invocation.skill.id, invocation.args);
+      const body = await render(mention.skill.id, mention.args);
       // List pending workspace files so the model treats them as the
       // skill's source material instead of unrelated background context.
       // Without this hint a slash invocation reads as bare metadata —
@@ -140,7 +234,7 @@ export async function buildSkillContext(
           : [];
       out.push(
         [
-          `[helix skills · invoked: ${invocation.skill.name}]`,
+          `[helix skills · invoked: ${mention.skill.name}]`,
           "The user explicitly invoked this skill. Follow its instructions",
           "verbatim for this turn.",
           ...attachmentLines,
@@ -150,7 +244,7 @@ export async function buildSkillContext(
       );
     } catch (err) {
       out.push(
-        `[helix skills · failed to render ${invocation.skill.name}]\n${
+        `[helix skills · failed to render ${mention.skill.name}]\n${
           err instanceof Error ? err.message : String(err)
         }`,
       );

@@ -30,6 +30,14 @@
   --assistant-soft: oklch(0.55 0.08 250 / 0.1);
   --assistant-ring: oklch(0.55 0.08 250 / 0.4);
 
+  /* Skills get their own indigo/violet so /skill chips don't look like
+   * errors (which a soft accent-red treatment would imply). Reads as
+   * "system / command" — distinct from --accent-* (primary actions) and
+   * --danger (destructive). */
+  --skill-raw: oklch(0.5 0.16 270);
+  --skill-soft: oklch(0.5 0.16 270 / 0.1);
+  --skill-ring: oklch(0.5 0.16 270 / 0.35);
+
   --success: oklch(0.55 0.13 150);
   --danger: oklch(0.55 0.19 25);
   --danger-fg: oklch(0.99 0 0);

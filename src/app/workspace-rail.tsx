@@ -1,3 +1,9 @@
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import type { AppView, WorkspaceId, WorkspaceRecord } from "./types";
 
 interface WorkspaceRailProps {
@@ -7,6 +13,19 @@ interface WorkspaceRailProps {
   readonly activeWorkspaceId: WorkspaceId | undefined;
   readonly onSelectWorkspace: (id: WorkspaceId) => void;
   readonly onAddWorkspace: () => void;
+  readonly onRequestRename: (workspace: WorkspaceRecord) => void;
+  /** Pop the OS folder picker for an existing workspace and update its path
+   * with the chosen folder. Implemented in the parent so the rail stays
+   * dialog-agnostic. */
+  readonly onRequestChangeFolder: (workspace: WorkspaceRecord) => void;
+  readonly onRequestDetachFolder: (workspace: WorkspaceRecord) => void;
+  readonly onRequestDelete: (workspace: WorkspaceRecord) => void;
+}
+
+interface MenuState {
+  readonly x: number;
+  readonly y: number;
+  readonly workspace: WorkspaceRecord;
 }
 
 export function WorkspaceRail({
@@ -16,7 +35,20 @@ export function WorkspaceRail({
   activeWorkspaceId,
   onSelectWorkspace,
   onAddWorkspace,
+  onRequestRename,
+  onRequestChangeFolder,
+  onRequestDetachFolder,
+  onRequestDelete,
 }: WorkspaceRailProps) {
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const canDelete = workspaces.length > 1;
+
+  function openMenu(e: ReactMouseEvent, workspace: WorkspaceRecord) {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY, workspace });
+  }
+
   return (
     <aside className="rail">
       <div className="rail-drag" />
@@ -32,6 +64,7 @@ export function WorkspaceRail({
           title={ws.displayName}
           aria-label={`Workspace ${ws.displayName}`}
           onClick={() => onSelectWorkspace(ws.id)}
+          onContextMenu={(e) => openMenu(e, ws)}
         >
           {initialsOf(ws.displayName)}
           <span className="rail-tooltip">{ws.displayName}</span>
@@ -64,7 +97,142 @@ export function WorkspaceRail({
           Settings<span style={{ opacity: 0.5, marginLeft: 6 }}>⌘,</span>
         </span>
       </button>
+      {menu ? (
+        <RailContextMenu
+          state={menu}
+          canDelete={canDelete}
+          onClose={() => setMenu(null)}
+          onRename={onRequestRename}
+          onChangeFolder={onRequestChangeFolder}
+          onDetachFolder={onRequestDetachFolder}
+          onDelete={onRequestDelete}
+        />
+      ) : null}
     </aside>
+  );
+}
+
+interface RailContextMenuProps {
+  readonly state: MenuState;
+  readonly canDelete: boolean;
+  readonly onClose: () => void;
+  readonly onRename: (workspace: WorkspaceRecord) => void;
+  readonly onChangeFolder: (workspace: WorkspaceRecord) => void;
+  readonly onDetachFolder: (workspace: WorkspaceRecord) => void;
+  readonly onDelete: (workspace: WorkspaceRecord) => void;
+}
+
+function RailContextMenu({
+  state,
+  canDelete,
+  onClose,
+  onRename,
+  onChangeFolder,
+  onDetachFolder,
+  onDelete,
+}: RailContextMenuProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x: state.x, y: state.y });
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    const margin = 6;
+    const maxX = window.innerWidth - rect.width - margin;
+    const maxY = window.innerHeight - rect.height - margin;
+    setPos({
+      x: Math.max(margin, Math.min(state.x, Math.max(margin, maxX))),
+      y: Math.max(margin, Math.min(state.y, Math.max(margin, maxY))),
+    });
+  }, [state.x, state.y]);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      const node = ref.current;
+      if (!node) return onClose();
+      if (!node.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const onScroll = () => onClose();
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onScroll);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [onClose]);
+
+  const ws = state.workspace;
+  const hasPath = !!ws.path;
+
+  return (
+    <div
+      ref={ref}
+      className="ctx-menu"
+      role="menu"
+      style={{ left: pos.x, top: pos.y }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <button
+        type="button"
+        className="ctx-menu-item"
+        role="menuitem"
+        onClick={() => {
+          onRename(ws);
+          onClose();
+        }}
+      >
+        Rename…
+      </button>
+      <button
+        type="button"
+        className="ctx-menu-item"
+        role="menuitem"
+        onClick={() => {
+          onChangeFolder(ws);
+          onClose();
+        }}
+      >
+        {hasPath ? "Change folder…" : "Attach folder…"}
+      </button>
+      {hasPath ? (
+        <button
+          type="button"
+          className="ctx-menu-item"
+          role="menuitem"
+          onClick={() => {
+            onDetachFolder(ws);
+            onClose();
+          }}
+        >
+          Detach folder
+        </button>
+      ) : null}
+      {canDelete ? (
+        <>
+          <div className="ctx-menu-sep" role="separator" />
+          <button
+            type="button"
+            className="ctx-menu-item"
+            role="menuitem"
+            data-tone="danger"
+            onClick={() => {
+              onDelete(ws);
+              onClose();
+            }}
+          >
+            Delete workspace…
+          </button>
+        </>
+      ) : null}
+    </div>
   );
 }
 

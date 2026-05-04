@@ -1,13 +1,30 @@
-import { useEffect, useMemo, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MutableRefObject,
+} from "react";
 import {
   BlockNoteSchema,
   createCodeBlockSpec,
   defaultBlockSpecs,
   defaultInlineContentSpecs,
 } from "@blocknote/core";
-import { useCreateBlockNote } from "@blocknote/react";
+import {
+  FormattingToolbar,
+  FormattingToolbarController,
+  getFormattingToolbarItems,
+  useBlockNoteEditor,
+  useCreateBlockNote,
+} from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import { codeBlockOptions } from "@blocknote/code-block";
+import { createClient } from "../../lib/llm/client";
+import type { ProviderConfig } from "../providers";
+import { useProviders } from "../providers";
 import { inlineMathSpec } from "./inline-math";
 import { mathBlockSpec } from "./math-block";
 import { vegaBlockSpec } from "./vega-block";
@@ -142,9 +159,271 @@ export function BlockNoteEditor({
     });
   }, [editor]);
 
+  // Resolve the active provider once on mount and keep the latest in a
+  // ref so the toolbar's inline-LLM call (which renders inside BlockNote's
+  // portal) always reads the current value without a remount churn.
+  const { activeProvider } = useProviders();
+  const providerRef = useRef(activeProvider);
+  useEffect(() => {
+    providerRef.current = activeProvider;
+  }, [activeProvider]);
+
+  // The custom toolbar leads with an "Ask AI" input so a selection can be
+  // edited inline without leaving the note. The default formatting
+  // buttons sit after it. Memoised so BlockNote doesn't re-mount the
+  // toolbar component on every editor render.
+  const CustomFormattingToolbar = useMemo(
+    () =>
+      function CustomFormattingToolbarInner() {
+        return (
+          <FormattingToolbar>
+            <AskAiToolbarItem providerRef={providerRef} />
+            {getFormattingToolbarItems()}
+          </FormattingToolbar>
+        );
+      },
+    [],
+  );
+
   return (
     <div className="blocknote-host" data-theme-flavour={blockNoteTheme}>
-      <BlockNoteView editor={editor} theme={blockNoteTheme} />
+      <BlockNoteView
+        editor={editor}
+        theme={blockNoteTheme}
+        formattingToolbar={false}
+      >
+        <FormattingToolbarController
+          formattingToolbar={CustomFormattingToolbar}
+        />
+      </BlockNoteView>
     </div>
+  );
+}
+
+/** Inline "Ask AI" prompt input rendered as the first item in the
+ * formatting toolbar. The user types an instruction; on Enter we make a
+ * direct streaming chat-completions call to the active provider and
+ * replace the selected text in the editor with the response as it
+ * streams. No chat session, no transcript — the answer lands in the doc.
+ *
+ * Streaming strategy: snapshot the original selection's `from` position
+ * (in ProseMirror coordinates), then on each delta dispatch a
+ * transaction that replaces `[from, currentEnd]` with the running
+ * accumulator. `from` is stable because nothing is inserted before it;
+ * positions after the selection shift, but the toolbar is anchored to
+ * this selection so the user typically isn't editing elsewhere. History
+ * entries from intermediate transactions are suppressed so undo
+ * collapses the whole AI edit into one step. */
+function AskAiToolbarItem({
+  providerRef,
+}: {
+  readonly providerRef: MutableRefObject<ProviderConfig | undefined>;
+}) {
+  const editor = useBlockNoteEditor();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [prompt, setPrompt] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  // Captured selection range. We snap it BEFORE focus shifts to the
+  // input — by `submit` time the editor has lost focus and ProseMirror
+  // may have collapsed `view.state.selection` to a cursor. Reading from
+  // a ref captured on toolbar mount + on every editor mousedown
+  // sidesteps that.
+  const selectionRef = useRef<{
+    readonly from: number;
+    readonly to: number;
+    readonly text: string;
+  } | null>(null);
+  // Abort handle for the active stream.
+  const abortRef = useRef<AbortController | null>(null);
+
+  const captureSelection = useCallback(() => {
+    const view = editor.prosemirrorView;
+    if (!view) return;
+    const { from, to } = view.state.selection;
+    if (from === to) return;
+    const text = view.state.doc.textBetween(from, to, "\n");
+    if (!text.trim()) return;
+    selectionRef.current = { from, to, text };
+  }, [editor]);
+
+  // Capture the selection eagerly on every render where the user isn't
+  // actively typing into the input. The toolbar only renders when there
+  // IS a selection in the editor, so this lands in the ref the first
+  // time we mount and refreshes if the user re-selects before clicking
+  // into the input.
+  useEffect(() => {
+    if (streaming) return;
+    if (
+      typeof document !== "undefined" &&
+      document.activeElement === inputRef.current
+    ) {
+      return;
+    }
+    captureSelection();
+  });
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStreaming(false);
+  }, []);
+
+  const submit = useCallback(async () => {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+    if (streaming) return;
+    const provider = providerRef.current;
+    if (!provider) {
+      setError("No active provider. Open Settings to add one.");
+      return;
+    }
+    const model = provider.model;
+    if (!model) {
+      setError(`Provider "${provider.name}" has no default model set.`);
+      return;
+    }
+    const captured = selectionRef.current;
+    if (!captured) {
+      setError("Selection lost — re-select and try again.");
+      return;
+    }
+    const { from, to, text: selectedText } = captured;
+
+    setError(undefined);
+    setStreaming(true);
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    try {
+      const client = createClient(provider);
+      const stream = client.chatStream(
+        {
+          model,
+          messages: [
+            {
+              role: "user",
+              content: `${trimmed}\n\nText:\n"""\n${selectedText}\n"""\n\nReply with the replacement text only — no preamble, no quotation marks, no commentary.`,
+            },
+          ],
+          stream: true,
+        },
+        { signal: ac.signal },
+      );
+
+      // Buffer the full response, then do one transaction. Per-delta
+      // dispatch was easy to get subtly wrong (positions, focus, history)
+      // and an inline edit looks the same to the user either way once
+      // the model finishes — usually under a second for a short reply.
+      let acc = "";
+      for await (const chunk of stream) {
+        if (ac.signal.aborted) break;
+        const delta = chunk.choices?.[0]?.delta?.content ?? "";
+        if (delta) acc += delta;
+      }
+      if (ac.signal.aborted) return;
+      if (!acc.trim()) {
+        setError("Model returned no content.");
+        return;
+      }
+
+      const liveView = editor.prosemirrorView;
+      const tr = liveView.state.tr;
+      tr.insertText(acc, from, to);
+      liveView.dispatch(tr);
+      setPrompt("");
+      // Refresh the captured selection to the freshly-inserted range so
+      // a follow-up ask on the same span (e.g. "shorter") works.
+      selectionRef.current = {
+        from,
+        to: from + acc.length,
+        text: acc,
+      };
+    } catch (e) {
+      if (!ac.signal.aborted) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      abortRef.current = null;
+      setStreaming(false);
+    }
+  }, [prompt, streaming, providerRef, editor]);
+
+  const onKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLInputElement>) => {
+      // Stop the editor and toolbar focus trap from seeing these — Enter
+      // would otherwise split the block, Esc bubbles into other BlockNote
+      // shortcuts, and arrow keys would steer the selection in the doc.
+      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (streaming) cancel();
+        else void submit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (streaming) cancel();
+        setPrompt("");
+        setError(undefined);
+      }
+    },
+    [submit, cancel, streaming],
+  );
+
+  // Cancel any in-flight stream when the toolbar unmounts (selection
+  // change, click outside). Without this an aborted user flow would
+  // keep streaming into the document under the cursor.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
+  }, []);
+
+  // What the input shows. While streaming we display a status message
+  // in `value` so the user sees feedback even with a non-empty prompt.
+  // Errors get the same treatment so they don't hide behind the
+  // placeholder when the user has typed.
+  const displayValue = streaming
+    ? "Asking… ⏎ to cancel"
+    : error
+      ? error
+      : prompt;
+  const displayReadOnly = streaming || !!error;
+
+  return (
+    <input
+      ref={inputRef}
+      className="bn-ask-ai"
+      type="text"
+      value={displayValue}
+      readOnly={displayReadOnly}
+      onChange={(e) => {
+        if (streaming) return;
+        if (error) {
+          // Any keystroke clears the error and starts fresh.
+          setError(undefined);
+          setPrompt(e.target.value);
+          return;
+        }
+        setPrompt(e.target.value);
+      }}
+      onKeyDown={onKeyDown}
+      // Capture the editor selection BEFORE focus shifts away — onFocus
+      // is too late, the editor is already blurred by then.
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        captureSelection();
+      }}
+      onFocus={() => {
+        // Belt-and-braces: if mousedown didn't capture (e.g. tab focus),
+        // try once more before the editor's blur reaches its handler.
+        if (!selectionRef.current) captureSelection();
+      }}
+      placeholder="Ask AI…"
+      aria-label="Ask AI about the selected text"
+      data-streaming={streaming || undefined}
+      data-error={error ? "true" : undefined}
+    />
   );
 }

@@ -271,3 +271,54 @@
   color: var(--fg-faint);
 }
 
+/* ---------- BlockNote "Ask AI" toolbar input ------------------------ */
+/* Sits as the first child of BlockNote's mantine formatting toolbar
+ * (a `<Flex>` from @mantine/core). Higher specificity via `.bn-toolbar`
+ * so it wins over any Mantine input reset that loads after notes.css.
+ * `flex-shrink: 0` keeps it at full width even when the toolbar's
+ * `width: fit-content` packs many buttons after it. */
+.bn-toolbar input.bn-ask-ai,
+input.bn-ask-ai {
+  appearance: none;
+  display: inline-block;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 400;
+  height: 24px;
+  line-height: 22px;
+  padding: 0 8px;
+  margin: 0 4px 0 2px;
+  border-radius: 4px;
+  width: 200px;
+  flex-shrink: 0;
+  flex-grow: 0;
+  outline: none;
+  box-shadow: none;
+  transition: border-color 100ms ease, box-shadow 100ms ease;
+}
+.bn-toolbar input.bn-ask-ai:focus,
+input.bn-ask-ai:focus {
+  border-color: var(--accent-raw);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-raw) 40%, transparent);
+}
+.bn-toolbar input.bn-ask-ai::placeholder,
+input.bn-ask-ai::placeholder {
+  color: var(--fg-faint);
+}
+.bn-toolbar input.bn-ask-ai[data-streaming],
+input.bn-ask-ai[data-streaming] {
+  border-color: var(--accent-raw);
+  background: color-mix(in oklab, var(--accent-raw) 6%, var(--bg));
+}
+.bn-toolbar input.bn-ask-ai[data-error],
+input.bn-ask-ai[data-error] {
+  border-color: #c83232;
+}
+.bn-toolbar input.bn-ask-ai[data-error]::placeholder,
+input.bn-ask-ai[data-error]::placeholder {
+  color: #c83232;
+}
+

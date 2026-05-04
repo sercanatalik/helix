@@ -6,6 +6,13 @@
 
 @import "katex/dist/katex.min.css";
 @import "streamdown/styles.css";
+/* Locally bundled variable fonts. Browsers only download the unicode-range
+ * subset they need (latin for English UI, ~30-50KB per family). The italic
+ * file is imported alongside so emphasis text in chat/notes renders. */
+@import "@fontsource-variable/inter-tight";
+@import "@fontsource-variable/inter-tight/wght-italic.css";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/jetbrains-mono/wght-italic.css";
 @import "./tokens.css";
 @import "../themes/dark.css";
 @import "../themes/light.css";

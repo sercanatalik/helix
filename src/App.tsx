@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -25,9 +27,18 @@ import {
 import { Composer, Transcript } from "./features/chat";
 import type { ComposerHandle } from "./features/chat";
 import type { TreeEntry } from "./lib/tauri-api";
-import { NoteEditorContainer } from "./features/notes";
-import { Settings } from "./features/settings";
 import { useProviders } from "./features/providers";
+
+// Heavy panes deferred behind React.lazy so the initial chunk stays small.
+// `NoteEditorContainer` pulls BlockNote + CodeMirror + shiki (~1MB raw); the
+// settings pane only matters when the user opens it. `vega-chart-impl` is
+// already lazy via `components/vega-chart.tsx`.
+const NoteEditorContainer = lazy(() =>
+  import("./features/notes").then((m) => ({ default: m.NoteEditorContainer })),
+);
+const Settings = lazy(() =>
+  import("./features/settings").then((m) => ({ default: m.Settings })),
+);
 import { useChat } from "./hooks/use-chat";
 import { useNotes } from "./hooks/use-notes";
 import { useSessions } from "./hooks/use-sessions";
@@ -346,7 +357,9 @@ export function App() {
         {isSettings ? (
           <>
             <Titlebar title="Settings" onBack={() => void onSelectView("chat")} />
-            <Settings />
+            <Suspense fallback={<PaneFallback />}>
+              <Settings />
+            </Suspense>
           </>
         ) : (
           <>
@@ -360,11 +373,13 @@ export function App() {
               onDetachNote={handleDetachNote}
             />
             {showNoteEditor && notesApi.activeNote && workspacesApi.activeWorkspace ? (
-              <NoteEditorContainer
-                workspace={workspacesApi.activeWorkspace}
-                note={notesApi.activeNote}
-                onRenamed={notesApi.setActive}
-              />
+              <Suspense fallback={<PaneFallback />}>
+                <NoteEditorContainer
+                  workspace={workspacesApi.activeWorkspace}
+                  note={notesApi.activeNote}
+                  onRenamed={notesApi.setActive}
+                />
+              </Suspense>
             ) : (
               <ChatView
                 activeWorkspace={workspacesApi.activeWorkspace}
@@ -428,6 +443,10 @@ interface ChatViewProps {
    * workspace files into pending context when the user clicks them in the
    * right sidebar. */
   readonly composerRef?: Ref<ComposerHandle>;
+}
+
+function PaneFallback() {
+  return <div className="pane-fallback" role="status" aria-live="polite" />;
 }
 
 function ChatView({

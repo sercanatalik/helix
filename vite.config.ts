@@ -33,5 +33,14 @@ export default defineConfig({
       process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // The chunks crossing the default 500KB warning threshold are all
+    // already-lazy vendor bundles that can't be split further by us:
+    // BlockNote (rich note editor) drags in shiki + mantine + prosemirror
+    // and only loads when a note is opened in rich mode; shiki language
+    // grammars (cpp, emacs-lisp, ...) load only when their language
+    // appears in a code block; vega's runtime + wasm load only when a
+    // chart is rendered. Set above the largest legitimate-lazy chunk
+    // (~1.05MB BlockNote) so a regression on an eager bundle still fires.
+    chunkSizeWarningLimit: 1100,
   },
 });

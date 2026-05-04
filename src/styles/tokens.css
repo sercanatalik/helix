@@ -19,11 +19,16 @@
  */
 
 :root {
+  /* The "* Variable" names come from the bundled @fontsource-variable/*
+   * packages (see styles/index.css). The plain "Inter Tight" / "JetBrains
+   * Mono" entries pick up an OS-installed copy if the bundled font ever
+   * fails to load; the rest of the stack is the platform fallback. */
   --font-sans:
-    "Inter Tight", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", sans-serif;
+    "Inter Tight Variable", "Inter Tight", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --font-mono:
-    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono",
+    Menlo, Consolas, monospace;
 
   /* Kind dot colors used by the MCP palette (tool / prompt / resource).
    * Theme-agnostic so a chip stays recognizable across themes. `tool` rides

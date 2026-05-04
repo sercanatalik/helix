@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { helixApi } from "../../lib/tauri-api";
 import {
@@ -7,8 +7,17 @@ import {
   type EditorMode,
 } from "../../lib/notes/storage";
 import type { NoteRecord, WorkspaceRecord } from "../../app/types";
-import { BlockNoteEditor } from "./blocknote-editor";
-import { CodeMirrorEditor } from "./codemirror-editor";
+
+// Each editor lives in its own chunk so opening a note pulls only the
+// active mode. BlockNote (rich) drags in shiki + mantine + the prosemirror
+// stack; CodeMirror (raw) drags in lang-markdown + lezer. Splitting saves
+// ~600KB on the side the user isn't currently viewing.
+const BlockNoteEditor = lazy(() =>
+  import("./blocknote-editor").then((m) => ({ default: m.BlockNoteEditor })),
+);
+const CodeMirrorEditor = lazy(() =>
+  import("./codemirror-editor").then((m) => ({ default: m.CodeMirrorEditor })),
+);
 
 const SAVE_DEBOUNCE_MS = 500;
 const NOTE_CHANGED_EVENT = "helix://note-changed";
@@ -300,19 +309,21 @@ function NoteEditor({
         </div>
       ) : null}
       <div className="note-editor-body scroll">
-        {mode === "rich" ? (
-          <BlockNoteEditor
-            key={`rich-${note.id}`}
-            initialMarkdown={content}
-            onChange={handleEditorChange}
-          />
-        ) : (
-          <CodeMirrorEditor
-            key={`raw-${note.id}`}
-            initialDoc={content}
-            onChange={handleEditorChange}
-          />
-        )}
+        <Suspense fallback={<div className="note-editor-loading">Loading editor…</div>}>
+          {mode === "rich" ? (
+            <BlockNoteEditor
+              key={`rich-${note.id}`}
+              initialMarkdown={content}
+              onChange={handleEditorChange}
+            />
+          ) : (
+            <CodeMirrorEditor
+              key={`raw-${note.id}`}
+              initialDoc={content}
+              onChange={handleEditorChange}
+            />
+          )}
+        </Suspense>
       </div>
     </section>
   );

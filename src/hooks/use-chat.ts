@@ -10,10 +10,32 @@ import type {
 import type { ProviderConfig } from "../features/providers";
 import type { ToolCallRecord, TranscriptMessage } from "../app/types";
 
-/** Maximum tool-call iterations before we abandon the loop. Defends against
- * a misbehaving model that keeps re-issuing the same tool call without ever
- * emitting a final assistant message. */
-const MAX_TOOL_ITERATIONS = 8;
+/** Maximum tool-call iterations before we force a final answer. Set high
+ * enough for genuine agentic work (explore → search → read several files →
+ * re-search → analyse → fetch → summarise) without letting a runaway model
+ * loop indefinitely. When we hit this cap we don't just bail — we issue
+ * one final call with `tool_choice: "none"` so the user gets a synthesis
+ * from whatever evidence was gathered instead of a blank message. */
+const MAX_TOOL_ITERATIONS = 25;
+
+/** Cap on the size of any single tool result we feed back to the model.
+ * Past this, we elide the middle and tell the model to narrow the call.
+ * Prevents a runaway grep / web_fetch from blowing the context window. The
+ * UI transcript still shows the full untruncated result. */
+const MAX_TOOL_RESULT_BYTES = 60_000;
+
+/** Hidden system message prepended whenever the request carries tools.
+ * Nudges the model toward parallelism, deeper drilling, and graceful error
+ * recovery — none of which a raw schema list communicates. User-supplied
+ * `extras.systemContext` lands after this so it can override. */
+const TOOL_USE_SYSTEM_PROMPT =
+  "You have access to tools. Use them to gather concrete evidence before you answer — do not guess at file contents, search results, or web data.\n\n" +
+  "Guidelines:\n" +
+  "- Issue multiple tool calls in parallel when the work is independent (reading several files, running multiple searches). One turn can contain many tool_calls.\n" +
+  "- If a tool returns truncated output, call it again with a wider window (offset, max_bytes, head_limit, larger limit) to read more.\n" +
+  "- If a tool fails, briefly note the failure and try a different approach — for example use glob_files or grep_search to locate a missing path, or web_search before web_fetch.\n" +
+  "- Do not repeat an identical tool call you just made; if you need different data, change the arguments.\n" +
+  "- Stop calling tools and write the final answer once you have enough evidence.";
 
 /** Default ceiling on completion tokens for non-reasoning models.
  * Overridable via the provider's extra_params, which merge in last. */
@@ -182,6 +204,51 @@ function extractVegaBlocks(text: string): string[] {
   return out;
 }
 
+/** Truncate a tool result that's larger than `MAX_TOOL_RESULT_BYTES`,
+ * keeping the head and tail so structural framing (headers, summary lines,
+ * trailing notes) survives. The middle is replaced with an explicit hint
+ * the model can act on. Untouched if already under the cap. */
+function capToolResultForModel(s: string): string {
+  if (s.length <= MAX_TOOL_RESULT_BYTES) return s;
+  // Reserve ~200 chars for the elision marker; split the rest evenly.
+  const half = Math.floor((MAX_TOOL_RESULT_BYTES - 200) / 2);
+  const elided = s.length - 2 * half;
+  return (
+    `${s.slice(0, half)}\n\n` +
+    `[… ${elided.toLocaleString()} bytes elided to keep context manageable. ` +
+    `Narrow the call (path, glob, head_limit, max_bytes, offset+limit) to focus on the relevant section. …]\n\n` +
+    `${s.slice(s.length - half)}`
+  );
+}
+
+/** Inspect a tool failure message and return a one-liner the model can
+ * actually use to recover. Returns null when no specific hint applies —
+ * we don't want to bury legitimate errors under generic advice. */
+function recoveryHintFor(toolName: string, errMessage: string): string | null {
+  const e = errMessage.toLowerCase();
+  if (/no such file|enoent|not found|cannot find|does not exist/.test(e)) {
+    return "Use glob_files or grep_search to locate the correct path before retrying.";
+  }
+  if (/not unique|multiple occurrences/.test(e)) {
+    return "Read the file first and supply a longer, unique excerpt as old_string — or set replace_all=true if you intend every occurrence.";
+  }
+  if (/could not parse|invalid json|json/.test(e) && /argument/.test(e)) {
+    return "Re-emit the call with valid JSON arguments matching the tool's parameter schema.";
+  }
+  if (/timeout|timed out|deadline/.test(e)) {
+    return "Narrow the scope (smaller glob, lower head_limit, smaller max_bytes) and try again.";
+  }
+  if (/non-2xx|status 4\d\d|status 5\d\d|http 4\d\d|http 5\d\d/.test(e)) {
+    return toolName === "web_fetch"
+      ? "The server rejected the request (consent wall / anti-bot / 5xx). Use web_search to find an alternative source or a JSON API endpoint."
+      : "The remote rejected the request. Try a different source or endpoint.";
+  }
+  if (/missing/.test(e) && /required/.test(e)) {
+    return "Add the missing required parameter and retry.";
+  }
+  return null;
+}
+
 /** Resolve and execute one tool call. Centralised so the agent loop above
  * doesn't have to thread the three failure paths (unknown tool, malformed
  * args, transport error) through nested branches. */
@@ -333,6 +400,14 @@ export function useChat(options: UseChatOptions): UseChatResult {
       // stay in the visible transcript but are dropped from the model-side
       // stack so the user can prune long sessions without losing scrollback.
       const apiMessages: ChatMessage[] = [];
+      const { tools, resolve: resolveTool } = buildToolPayload(
+        extras?.mcpTools ?? [],
+      );
+      // When the model gets tools this turn, prepend a brief usage policy.
+      // Lands first so user-supplied systemContext can override specifics.
+      if (tools.length > 0) {
+        apiMessages.push({ role: "system", content: TOOL_USE_SYSTEM_PROMPT });
+      }
       if (extras?.systemContext?.length) {
         for (const ctx of extras.systemContext) {
           if (ctx.trim().length > 0) {
@@ -345,10 +420,6 @@ export function useChat(options: UseChatOptions): UseChatResult {
         ? transcriptHistory.filter((m) => m.createdAt >= cutoff)
         : transcriptHistory;
       apiMessages.push(...sendableHistory.map(toApiMessage));
-
-      const { tools, resolve: resolveTool } = buildToolPayload(
-        extras?.mcpTools ?? [],
-      );
 
       // True while we're inside a tool-loop iteration that has at least one
       // tool_call delta. We use it to gate transcript streaming: text that
@@ -382,26 +453,44 @@ export function useChat(options: UseChatOptions): UseChatResult {
           );
         };
 
+        // Reasoning models reject `max_tokens` and require
+        // `max_completion_tokens`; they also need a much larger budget
+        // because reasoning tokens are billed against the same cap.
+        // Either is overridable via the provider's extra_params, which
+        // merge in last and win. Hoisted out of the loop — the values
+        // don't change between iterations and the post-loop synthesis
+        // call below also reads them.
+        const reasoning = isReasoningModel(chosenModel);
+        const tokenLimitField = reasoning
+          ? "max_completion_tokens"
+          : "max_tokens";
+        const tokenLimit = reasoning
+          ? DEFAULT_REASONING_MAX_TOKENS
+          : DEFAULT_MAX_TOKENS;
+
+        // Signatures of the previous round's tool calls. We append a
+        // hint to any result whose `(name, args)` matches a call from
+        // the immediately-preceding round, nudging the model to vary
+        // its arguments instead of looping on the same lookup.
+        let lastCallSignatures = new Set<string>();
+        // True iff the model emitted a final text answer (finish_reason
+        // ≠ "tool_calls"). When false after the loop terminates we made
+        // the cap without a synthesis — handled by the fallback below.
+        let normalExit = false;
+
         for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
           if (ac.signal.aborted) break;
-          // Reasoning models reject `max_tokens` and require
-          // `max_completion_tokens`; they also need a much larger budget
-          // because reasoning tokens are billed against the same cap.
-          // Either is overridable via the provider's extra_params, which
-          // merge in last and win.
-          const reasoning = isReasoningModel(chosenModel);
-          const tokenLimitField = reasoning
-            ? "max_completion_tokens"
-            : "max_tokens";
-          const tokenLimit = reasoning
-            ? DEFAULT_REASONING_MAX_TOKENS
-            : DEFAULT_MAX_TOKENS;
           const stream = client.chatStream(
             {
               model: chosenModel,
               messages: apiMessages,
               tools: tools.length > 0 ? tools : undefined,
               tool_choice: tools.length > 0 ? "auto" : undefined,
+              // Encourage providers (notably OpenAI) to emit multiple
+              // tool_calls in a single turn so we can dispatch them in
+              // parallel below. User-supplied extra_params spread last
+              // can override (e.g. a buggy proxy that mishandles it).
+              ...(tools.length > 0 ? { parallel_tool_calls: true } : {}),
               [tokenLimitField]: tokenLimit,
               ...buildExtraBody(provider),
             },
@@ -527,44 +616,146 @@ export function useChat(options: UseChatOptions): UseChatResult {
             }
             patchCallRecords();
 
-            for (const { tc, callId } of dispatched) {
-              const binding = resolveTool(tc.name);
-              const startedAt = performance.now();
-              const { result: toolResult, isError } = await runToolCall(
-                binding,
-                tc.name,
-                tc.arguments,
-              );
+            // Dispatch all tool calls concurrently. Independent reads /
+            // searches / fetches stop being serialised, which both speeds
+            // up multi-step exploration and stops penalising the model
+            // for fanning out. `Promise.all` preserves input order so
+            // the corresponding `role: "tool"` messages we append below
+            // line up with the assistant's tool_call ids.
+            const thisRoundSignatures = new Set<string>();
+            for (const { tc } of dispatched) {
+              thisRoundSignatures.add(`${tc.name}\0${tc.arguments || ""}`);
+            }
+            const settled = await Promise.all(
+              dispatched.map(async ({ tc, callId }) => {
+                const binding = resolveTool(tc.name);
+                const startedAt = performance.now();
+                const { result: rawResult, isError } = await runToolCall(
+                  binding,
+                  tc.name,
+                  tc.arguments,
+                );
+                // Build the version the model will see: cap oversize,
+                // append a recovery hint on errors, flag exact repeats.
+                let modelResult = rawResult;
+                if (isError) {
+                  const hint = recoveryHintFor(tc.name, rawResult);
+                  if (hint) modelResult = `${rawResult}\n\n[hint] ${hint}`;
+                }
+                const sig = `${tc.name}\0${tc.arguments || ""}`;
+                if (lastCallSignatures.has(sig)) {
+                  modelResult = `${modelResult}\n\n[note] This is an identical call to one you just made. If you need different data, change the arguments; otherwise stop calling this tool and use what you have.`;
+                }
+                modelResult = capToolResultForModel(modelResult);
+                const durationMs = Math.round(performance.now() - startedAt);
+                // Patch the UI as each call settles so the user sees
+                // running → complete transitions live, not all at once.
+                const idx = recordIndex.get(callId);
+                const existing =
+                  idx !== undefined ? callRecords[idx] : undefined;
+                if (idx !== undefined && existing) {
+                  callRecords[idx] = {
+                    ...existing,
+                    // UI gets the raw, untruncated result so the user
+                    // can inspect what really came back. The model gets
+                    // the capped/hinted version we built above.
+                    result: rawResult,
+                    status: isError ? "error" : "complete",
+                    isError,
+                    durationMs,
+                  };
+                  patchCallRecords();
+                }
+                return { callId, rawResult, modelResult, isError };
+              }),
+            );
+
+            for (const { rawResult, isError } of settled) {
               if (!isError) {
-                for (const block of extractVegaBlocks(toolResult)) {
+                for (const block of extractVegaBlocks(rawResult)) {
                   harvestedCharts.push(block);
                 }
               }
-              const idx = recordIndex.get(callId);
-              const existing = idx !== undefined ? callRecords[idx] : undefined;
-              if (idx !== undefined && existing) {
-                callRecords[idx] = {
-                  ...existing,
-                  result: toolResult,
-                  status: isError ? "error" : "complete",
-                  isError,
-                  durationMs: Math.round(performance.now() - startedAt),
-                };
-                patchCallRecords();
-              }
+            }
+            for (const { callId, modelResult } of settled) {
               apiMessages.push({
                 role: "tool",
                 tool_call_id: callId,
-                content: toolResult,
+                content: modelResult,
               });
             }
+            lastCallSignatures = thisRoundSignatures;
             // Loop back for the next iteration.
             continue;
           }
 
           // Terminal: this iteration's text is the final response.
           finalContent = acc;
+          normalExit = true;
           break;
+        }
+
+        // Budget exhausted without a textual answer: do one more call
+        // with `tool_choice: "none"` so the model is forced to summarise
+        // from the evidence we already gathered. Without this, hitting
+        // the iteration cap left the assistant message blank.
+        if (
+          !normalExit &&
+          !ac.signal.aborted &&
+          callRecords.length > 0 &&
+          tools.length > 0
+        ) {
+          apiMessages.push({
+            role: "system",
+            content:
+              "Tool-call budget reached. Synthesise a final answer from the evidence above. Do not request more tools.",
+          });
+          const stream = client.chatStream(
+            {
+              model: chosenModel,
+              messages: apiMessages,
+              tools,
+              tool_choice: "none",
+              [tokenLimitField]: tokenLimit,
+              ...buildExtraBody(provider),
+            },
+            { signal: ac.signal },
+          );
+          let acc = "";
+          for await (const chunk of stream) {
+            const choice = chunk.choices[0];
+            if (!choice) continue;
+            const delta = choice.delta;
+            const reasoningDelta =
+              delta?.reasoning_content ?? delta?.reasoning;
+            if (reasoningDelta) {
+              reasoningAcc += reasoningDelta;
+              const snapshot = reasoningAcc;
+              patch((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? {
+                        ...m,
+                        reasoning: snapshot,
+                        reasoningStatus: "streaming",
+                      }
+                    : m,
+                ),
+              );
+            }
+            if (delta?.content) {
+              acc += delta.content;
+              const snapshot = acc;
+              patch((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: snapshot } : m,
+                ),
+              );
+            }
+          }
+          finalContent =
+            acc ||
+            "_(stopped — tool-call budget exhausted with no synthesis from the model)_";
         }
 
         // Append any vega-lite blocks we lifted out of tool results that

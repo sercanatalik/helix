@@ -110,7 +110,22 @@ export async function runBuiltinTool(
         }
         const headerLines: string[] = [];
         if (typeof r.totalLines === "number") {
-          headerLines.push(`Total lines: ${r.totalLines}`);
+          // Count the lines we actually got back. cat -n format prepends
+          // a line-number column, so even an "empty" source line still
+          // produces a non-empty rendered line; the only zero-length
+          // entry from split is a trailing newline artefact.
+          const off = typeof offset === "number" ? offset : 0;
+          const linesShown = r.content
+            ? r.content.split("\n").filter((l) => l.length > 0).length
+            : 0;
+          const endLine = off + linesShown;
+          if (linesShown > 0 && endLine < r.totalLines) {
+            headerLines.push(
+              `Showing lines ${off + 1}-${endLine} of ${r.totalLines}. To read the next chunk, call again with offset=${endLine} (and optionally a larger limit).`,
+            );
+          } else {
+            headerLines.push(`Total lines: ${r.totalLines}`);
+          }
         }
         const header = headerLines.length > 0 ? `${headerLines.join("\n")}\n\n` : "";
         return { result: `${header}${r.content}`, isError: false };

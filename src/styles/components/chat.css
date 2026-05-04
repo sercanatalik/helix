@@ -1288,6 +1288,53 @@ button.mcp-tool-chip:disabled {
   animation: helix-tool-spin 0.85s linear infinite;
 }
 
+/* ---------- Collapsed tool-block summary ----------
+ * One-liner that replaces the entire tool list once the assistant message
+ * finalises (no errors). Click to re-expand. Mirrors Claude Code's pattern
+ * of fading tool chatter once the work is done so the prose wins. */
+.tool-block-collapsed {
+  margin: 0 0 8px;
+}
+.tool-block-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  max-width: 100%;
+  min-width: 0;
+}
+.tool-block-summary:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.tool-block-summary-label {
+  font-weight: 500;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+.tool-block-summary-tools {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.tool-block-summary-duration {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+
 /* ---------- Collapsed tool-call group ---------- */
 /* Promotes a contiguous run of MCP calls (≥2 calls or any retry) into a
  * single summary line so the prose answer wins the visual hierarchy. The

@@ -267,7 +267,12 @@ function ReasoningBlock({
  * contiguous calls that share a `serverName`. Each run becomes either a
  * single inline row (one success → looks identical to before) or a
  * collapsible group with a one-line summary header — the new default once
- * a message has multiple calls or a retry pattern. */
+ * a message has multiple calls or a retry pattern.
+ *
+ * The whole block also auto-collapses once the message stops streaming,
+ * mirroring Claude Code: tool indicators are visible while the model is
+ * working, then shrink to one summary line so the prose answer dominates.
+ * Errors keep the block expanded so the user can see what failed. */
 function ToolCallGroupList({
   calls,
   streaming,
@@ -276,6 +281,57 @@ function ToolCallGroupList({
   readonly streaming: boolean;
 }) {
   const groups = useMemo(() => groupCalls(calls), [calls]);
+  const hasError = useMemo(
+    () => calls.some((c) => effectiveStatus(c) === "error"),
+    [calls],
+  );
+
+  // Open while streaming so the user watches calls land live; collapse on
+  // the streaming → done transition unless an error needs surfacing. After
+  // that, the user's manual toggles always win — including reopening on a
+  // re-stream (rare, but happens for retried sends).
+  const [open, setOpen] = useState<boolean>(streaming || hasError);
+  const previouslyStreamingRef = useRef(streaming);
+  useEffect(() => {
+    if (previouslyStreamingRef.current && !streaming) {
+      if (!hasError) setOpen(false);
+    } else if (!previouslyStreamingRef.current && streaming) {
+      setOpen(true);
+    }
+    previouslyStreamingRef.current = streaming;
+  }, [streaming, hasError]);
+
+  if (!open) {
+    const totalMs = calls.reduce(
+      (sum, c) => sum + (c.durationMs ?? 0),
+      0,
+    );
+    const distinctTools = Array.from(new Set(calls.map((c) => c.toolName)));
+    const label = `Used ${calls.length} tool${calls.length === 1 ? "" : "s"}`;
+    return (
+      <div className="tool-block tool-block-collapsed">
+        <button
+          type="button"
+          className="tool-block-summary"
+          onClick={() => setOpen(true)}
+          aria-expanded={false}
+        >
+          <ToolStatusIcon status="complete" />
+          <span className="tool-block-summary-label">{label}</span>
+          <span className="tool-block-summary-tools">
+            {distinctTools.join(" · ")}
+          </span>
+          {totalMs > 0 ? (
+            <span className="tool-block-summary-duration">
+              {formatDuration(totalMs)}
+            </span>
+          ) : null}
+          <ChevronIcon open={false} />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="tool-block" role="list">
       {groups.map((group, idx) => {

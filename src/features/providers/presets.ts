@@ -18,9 +18,9 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   {
     id: "openai",
     name: "OpenAI",
-    description: "GPT-4o, o-series, and friends. Chat completions API.",
+    description: "GPT-5, o-series, and friends. Chat completions API.",
     baseUrl: "https://api.openai.com/v1",
-    defaultModel: "gpt-4o-mini",
+    defaultModel: "gpt-5",
     defaultAuth: bearer(),
   },
   {
@@ -29,7 +29,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     description:
       "Self-hosted proxy that fronts 100+ LLMs behind one OpenAI-compatible API.",
     baseUrl: "http://localhost:4000",
-    defaultModel: "gpt-4o-mini",
+    defaultModel: "gpt-5",
     defaultAuth: bearer(),
   },
   {

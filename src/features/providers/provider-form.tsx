@@ -263,7 +263,7 @@ export function ProviderForm({
               className="field-input mono"
               value={draft.model ?? ""}
               onChange={(e) => setField("model", e.target.value)}
-              placeholder="gpt-4o-mini"
+              placeholder="gpt-5"
               spellCheck={false}
               autoCapitalize="off"
               autoCorrect="off"

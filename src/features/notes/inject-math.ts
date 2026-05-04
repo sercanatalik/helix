@@ -7,6 +7,8 @@
 // `$$...$$` runs into our custom `inlineMath` / `mathBlock` schemas. The
 // reverse runs on save so the on-disk markdown stays portable.
 
+import { mapBlocks } from "../../lib/notes/walk-blocks";
+
 // Match `$ ... $` runs that don't span newlines, allow escaped `\$` inside.
 // Anchored on word/space/punctuation boundaries so prices like "$5" don't
 // accidentally trigger.
@@ -79,18 +81,11 @@ function injectInline(content: any[]): any[] {
 /** Walk parsed blocks and lift `$...$` runs out of text content into
  * `inlineMath` nodes. Mutates a fresh copy — the input is not modified. */
 export function injectMathIntoBlocks(blocks: any[]): any[] {
-  return blocks.map(walk);
-
-  function walk(block: any): any {
-    const next = { ...block };
-    if (Array.isArray(next.content)) {
-      next.content = injectInline(next.content);
-    }
-    if (Array.isArray(next.children)) {
-      next.children = next.children.map(walk);
-    }
-    return next;
-  }
+  return mapBlocks(blocks, (block) =>
+    Array.isArray(block?.content)
+      ? { ...block, content: injectInline(block.content) }
+      : block,
+  );
 }
 
 function extractInline(content: any[]): any[] {
@@ -112,25 +107,19 @@ function extractInline(content: any[]): any[] {
  * `$...$` plain text so `blocksToMarkdownLossy` produces portable markdown.
  * Also flattens `mathBlock` blocks into `$$...$$` paragraph blocks. */
 export function extractMathToText(blocks: any[]): any[] {
-  return blocks.map(walk);
-
-  function walk(block: any): any {
-    if (block && block.type === "mathBlock") {
+  return mapBlocks(blocks, (block) => {
+    if (block?.type === "mathBlock") {
       const latex = block.props?.latex ?? "";
       return {
         type: "paragraph",
         content: [{ type: "text", text: `$$${latex}$$`, styles: {} }],
       };
     }
-    const next = { ...block };
-    if (Array.isArray(next.content)) {
-      next.content = extractInline(next.content);
+    if (Array.isArray(block?.content)) {
+      return { ...block, content: extractInline(block.content) };
     }
-    if (Array.isArray(next.children)) {
-      next.children = next.children.map(walk);
-    }
-    return next;
-  }
+    return block;
+  });
 }
 
 /** Pre-process raw markdown so multi-line `$$ ... $$` runs collapse to a
@@ -148,28 +137,19 @@ export function preProcessDisplayMath(markdown: string): string {
  * into `mathBlock` blocks. Run AFTER `injectMathIntoBlocks` so inline
  * math nodes don't get re-considered. */
 export function injectMathBlocks(blocks: any[]): any[] {
-  return blocks.map(walk);
-
-  function walk(block: any): any {
-    const next = { ...block };
-    if (Array.isArray(next.children)) {
-      next.children = next.children.map(walk);
-    }
+  return mapBlocks(blocks, (block) => {
     if (
-      next.type === "paragraph" &&
-      Array.isArray(next.content) &&
-      next.content.length === 1 &&
-      next.content[0]?.type === "text" &&
-      typeof next.content[0]?.text === "string"
+      block?.type === "paragraph" &&
+      Array.isArray(block.content) &&
+      block.content.length === 1 &&
+      block.content[0]?.type === "text" &&
+      typeof block.content[0]?.text === "string"
     ) {
-      const match = next.content[0].text.match(DISPLAY_MATH_PARA);
+      const match = block.content[0].text.match(DISPLAY_MATH_PARA);
       if (match) {
-        return {
-          type: "mathBlock",
-          props: { latex: match[1].trim() },
-        };
+        return { type: "mathBlock", props: { latex: match[1].trim() } };
       }
     }
-    return next;
-  }
+    return block;
+  });
 }

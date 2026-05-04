@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type FormEvent } from "react";
 import { Button } from "../../components/ui";
 import { KeyValueList } from "../providers/key-value-list";
 import type { KeyValuePair } from "../providers";
@@ -170,7 +170,7 @@ export function McpForm({
     }
   }, [draft, testReady]);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!canSave) return;
     void onSave(cleanInput(draft));

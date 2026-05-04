@@ -6,9 +6,9 @@ interface VegaChartProps {
   readonly isIncomplete: boolean;
 }
 
-// React.lazy on a dynamic import puts vega/vega-lite/vega-embed/react-vega
-// into their own chunks — they're ~600KB+ minified and only needed when a
-// message actually contains a ```vega-lite / ```vega artifact.
+// React.lazy on a dynamic import puts vega/vega-lite/vega-embed into their
+// own chunks — they're ~600KB+ minified and only needed when a message
+// actually contains a ```vega-lite / ```vega artifact.
 const VegaChartImpl = lazy(() =>
   import("./vega-chart-impl").then((m) => ({ default: m.VegaChart })),
 );

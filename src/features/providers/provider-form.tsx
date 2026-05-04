@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type FormEvent } from "react";
 import { KeyValueList } from "./key-value-list";
 import { Button } from "../../components/ui";
 import { buildExtraBody, createClient } from "../../lib/llm/client";
@@ -206,7 +206,7 @@ export function ProviderForm({
     }
   }, [draft]);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!canSave) return;
     onSave(cleanDraft({ ...draft, name: draft.name.trim() }));

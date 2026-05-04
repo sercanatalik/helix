@@ -11,6 +11,8 @@
 // code blocks again so the on-disk markdown stays portable and editable in
 // any other tool.
 
+import { mapBlocks } from "../../lib/notes/walk-blocks";
+
 const VEGA_LANGS = new Set(["vega-lite", "vegalite", "vega"]);
 
 function detectVegaLanguage(language: unknown, code: unknown): string | null {
@@ -82,17 +84,10 @@ function codeBlockText(block: any): string {
 /** Walk parsed blocks; convert any code block whose language identifies
  * a Vega/Vega-Lite spec into a `vegaBlock`. Mutates a fresh copy. */
 export function injectVegaBlocks(blocks: any[]): any[] {
-  return blocks.map(walk);
-
-  function walk(block: any): any {
-    const next = { ...block };
-    if (Array.isArray(next.children)) {
-      next.children = next.children.map(walk);
-    }
-    if (next?.type === "codeBlock") {
-      const language = next.props?.language;
-      const code = codeBlockText(next);
-      const detected = detectVegaLanguage(language, code);
+  return mapBlocks(blocks, (block) => {
+    if (block?.type === "codeBlock") {
+      const code = codeBlockText(block);
+      const detected = detectVegaLanguage(block.props?.language, code);
       if (detected) {
         return {
           type: "vegaBlock",
@@ -100,30 +95,24 @@ export function injectVegaBlocks(blocks: any[]): any[] {
         };
       }
     }
-    return next;
-  }
+    return block;
+  });
 }
 
 /** Reverse of `injectVegaBlocks`: emit a fenced code block in the original
  * language so `blocksToMarkdownLossy` produces portable markdown. Run
  * before any other extraction step that walks the block tree. */
 export function extractVegaToCodeBlocks(blocks: any[]): any[] {
-  return blocks.map(walk);
-
-  function walk(block: any): any {
+  return mapBlocks(blocks, (block) => {
     if (block?.type === "vegaBlock") {
-      const spec = block.props?.spec ?? "";
-      const language = block.props?.language ?? "vega-lite";
       return {
         type: "codeBlock",
-        props: { language },
-        content: [{ type: "text", text: spec, styles: {} }],
+        props: { language: block.props?.language ?? "vega-lite" },
+        content: [
+          { type: "text", text: block.props?.spec ?? "", styles: {} },
+        ],
       };
     }
-    const next = { ...block };
-    if (Array.isArray(next.children)) {
-      next.children = next.children.map(walk);
-    }
-    return next;
-  }
+    return block;
+  });
 }

@@ -10,7 +10,7 @@ import {
 } from "react";
 import { Button, Kbd } from "../../../components/ui";
 import { BuiltinPalette } from "../builtin-palette";
-import { McpPalette } from "../mcp-palette";
+import { McpPalette, type ServerGroup } from "../mcp-palette";
 import { useMcpServers } from "../../../hooks/use-mcp-servers";
 import { useMcpEnabledTags } from "../../../hooks/use-mcp-enabled-tags";
 import { useModels } from "../../../hooks/use-models";
@@ -105,12 +105,6 @@ export interface ComposerHandle {
 }
 
 type ChipKind = "tools" | "prompts" | "resources";
-
-interface ServerGroup<T> {
-  readonly server: McpServerConfig;
-  readonly items: readonly T[];
-  readonly listError: string | undefined;
-}
 
 const EMPTY_TRANSCRIPT: readonly TranscriptMessage[] = [];
 

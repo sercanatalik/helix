@@ -325,6 +325,12 @@ export function useChat(options: UseChatOptions): UseChatResult {
   // The AbortController controlling the active stream. Lives in a ref so the
   // stable `stop` callback can reach it without reattaching to every chunk.
   const abortRef = useRef<AbortController | null>(null);
+  // Pending rAF handle for coalescing streaming patches. Tokens often arrive
+  // faster than React can paint (100+/sec for some providers); without this
+  // every chunk would trigger a transcript re-render plus a layout pass for
+  // auto-scroll, and the in-flight tool/reasoning rows would re-render on
+  // every keystroke of the model.
+  const pendingFrameRef = useRef<number | null>(null);
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -334,9 +340,28 @@ export function useChat(options: UseChatOptions): UseChatResult {
   useEffect(() => {
     contextResetAtRef.current = contextResetAt;
   }, [contextResetAt]);
+  useEffect(() => {
+    return () => {
+      if (pendingFrameRef.current !== null) {
+        cancelAnimationFrame(pendingFrameRef.current);
+        pendingFrameRef.current = null;
+      }
+    };
+  }, []);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
+  }, []);
+
+  // Synchronously deliver the latest transcript and cancel any deferred
+  // frame. Call before terminal state changes (stream end / abort / error)
+  // so the user doesn't see `isStreaming: false` over a stale transcript.
+  const flushPending = useCallback(() => {
+    if (pendingFrameRef.current !== null) {
+      cancelAnimationFrame(pendingFrameRef.current);
+      pendingFrameRef.current = null;
+    }
+    onChangeRef.current(messagesRef.current);
   }, []);
 
   const patch = useCallback(
@@ -345,7 +370,14 @@ export function useChat(options: UseChatOptions): UseChatResult {
     ) => {
       const next = mutator(messagesRef.current);
       messagesRef.current = next;
-      onChangeRef.current(next);
+      // Update the ref synchronously so the next mutator sees the latest
+      // state, but defer the React notification to the next frame to
+      // collapse many chunks into a single render.
+      if (pendingFrameRef.current !== null) return;
+      pendingFrameRef.current = requestAnimationFrame(() => {
+        pendingFrameRef.current = null;
+        onChangeRef.current(messagesRef.current);
+      });
     },
     [],
   );
@@ -445,7 +477,11 @@ export function useChat(options: UseChatOptions): UseChatResult {
         const harvestedCharts: string[] = [];
 
         const patchCallRecords = () => {
-          const snapshot = callRecords.map((r) => ({ ...r }));
+          // Shallow copy preserves per-record identity for unchanged calls
+          // (records are replaced in place at the index that mutated), so
+          // memoized ToolRow children skip re-rendering when only one of
+          // many calls transitions running → complete.
+          const snapshot = [...callRecords];
           patch((prev) =>
             prev.map((m) =>
               m.id === assistantId ? { ...m, toolCalls: snapshot } : m,
@@ -849,11 +885,15 @@ export function useChat(options: UseChatOptions): UseChatResult {
           );
         }
       } finally {
+        // Drain any rAF-deferred patch before flipping isStreaming so the
+        // user sees the final transcript synchronously, not "done" over a
+        // one-frame-stale view.
+        flushPending();
         if (abortRef.current === ac) abortRef.current = null;
         setIsStreaming(false);
       }
     },
-    [provider, isStreaming, patch],
+    [provider, isStreaming, patch, flushPending],
   );
 
   return { isStreaming, error, send, stop };

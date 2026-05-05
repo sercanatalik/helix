@@ -96,8 +96,17 @@ function MessageViewImpl({ message, stale = false }: MessageViewProps) {
   const reasoning = message.reasoning ?? "";
   const reasoningStreaming =
     streaming && message.reasoningStatus !== "complete";
+  // Show the "Churning…▎" line whenever the assistant is working but the
+  // user can't otherwise tell — i.e. no live text yet AND reasoning isn't
+  // animating its own cursor. Tool calls in flight count as "working with
+  // nothing to type yet", so we keep the cursor visible across them; once
+  // post-tool content starts streaming, the typed text itself is the live
+  // edge and the status line steps out of the way.
   const showStatusLine =
-    isAssistant && streaming && !reasoning && toolCalls.length === 0;
+    isAssistant &&
+    streaming &&
+    !reasoningStreaming &&
+    !message.content;
   const verb = useRotatingVerb(isAssistant && streaming);
 
   return (
@@ -528,7 +537,11 @@ function ToolCallGroup({
   );
 }
 
-function ToolRow({ call }: { readonly call: ToolCallRecord }) {
+// Memoized: rows re-render only when the specific call object identity
+// changes. `patchCallRecords` upstream preserves identity for unchanged
+// calls, so a settling tool doesn't drag every sibling row through a
+// re-render — important when the model fans out 8+ parallel tool calls.
+const ToolRow = memo(function ToolRow({ call }: { readonly call: ToolCallRecord }) {
   // Persist legacy records that have only `isError` (status was added
   // later) — derive a sensible status so older transcripts still render
   // with the right indicator.
@@ -582,7 +595,7 @@ function ToolRow({ call }: { readonly call: ToolCallRecord }) {
       ) : null}
     </div>
   );
-}
+});
 
 /** Pretty-print a serialized JSON-ish argument blob. Unparseable input
  * returns as-is so non-JSON tool inputs (raw strings, shell args) still

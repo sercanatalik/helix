@@ -27,7 +27,10 @@ import {
   type WorkspaceRecord,
 } from "./app/types";
 import { Composer, Transcript } from "./features/chat";
-import type { ComposerHandle } from "./features/chat";
+import type {
+  ComposerHandle,
+  PendingContextEntry,
+} from "./features/chat";
 import type { TreeEntry } from "./lib/tauri-api";
 import { useProviders } from "./features/providers";
 
@@ -672,6 +675,23 @@ function ChatView({
     setContextResetAt(id, undefined);
   }, [setMessages, setContextResetAt]);
 
+  // Stable callback identity matters: the Composer subscribes via a
+  // useEffect that lists this in its deps, so a fresh arrow every render
+  // would refire the effect, refire setAttachedFilePaths with a new Set,
+  // and pin React in a re-render loop.
+  const onPendingContextChange = useCallback(
+    (entries: readonly PendingContextEntry[]) => {
+      const paths = new Set<string>();
+      for (const e of entries) {
+        if (e.kind === "file" && e.id.startsWith("file:")) {
+          paths.add(e.id.slice("file:".length));
+        }
+      }
+      onAttachedFilePathsChange?.(paths);
+    },
+    [onAttachedFilePathsChange],
+  );
+
   const { isStreaming, error, send, stop } = useChat({
     provider: activeProvider,
     messages,
@@ -710,18 +730,7 @@ function ChatView({
         onResetContext={onResetContext}
         onClearTranscript={onClearTranscript}
         workspacePath={activeWorkspace?.path || undefined}
-        onPendingContextChange={(entries) => {
-          // Project to absolute file paths only — that's all the workspace
-          // pane needs to highlight rows. File entry ids are `file:${absPath}`
-          // (set in the Composer's attachWorkspaceFile imperative handle).
-          const paths = new Set<string>();
-          for (const e of entries) {
-            if (e.kind === "file" && e.id.startsWith("file:")) {
-              paths.add(e.id.slice("file:".length));
-            }
-          }
-          onAttachedFilePathsChange?.(paths);
-        }}
+        onPendingContextChange={onPendingContextChange}
       />
     </>
   );

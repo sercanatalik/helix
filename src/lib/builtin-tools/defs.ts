@@ -30,13 +30,19 @@ export const BUILTIN_SLASH_COMMANDS: readonly BuiltinSlashCommand[] = [
 
 /** Subgroups inside the Helix Core popover — mirror the MCP popover's
  * tag-bucket layout so each kind of capability gets its own master switch. */
-export type BuiltinToolGroup = "file_system" | "data" | "web";
+export type BuiltinToolGroup = "file_system" | "data" | "web" | "agent";
 
 export const BUILTIN_GROUP_LABEL: Readonly<Record<BuiltinToolGroup, string>> = {
   file_system: "File System",
   data: "Data Tools",
   web: "Web",
+  agent: "Agents",
 };
+
+/** Tool name the model uses to fan a focused subtask out to a sub-agent.
+ * Exported so the agent loop can recognise it without string-matching
+ * the literal in two places. */
+export const DISPATCH_AGENT_TOOL_NAME = "dispatch_agent";
 
 export interface BuiltinToolDef {
   /** Tool name as the model sees it. Matches the Tauri command name. */
@@ -406,6 +412,35 @@ export const BUILTIN_TOOLS: readonly BuiltinToolDef[] = [
         },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: DISPATCH_AGENT_TOOL_NAME,
+    label: "Dispatch Agent",
+    group: "agent",
+    description:
+      "Spawn a sub-agent to accomplish a focused task in parallel with other work. The sub-agent runs an independent tool-call loop with the same model and a filtered subset of your tools, then returns one final answer as this tool's result. Use it to fan out independent investigations (e.g. 'profile module A' / 'profile module B' in parallel) or to keep a long, noisy exploration out of the main conversation. Issue several dispatch_agent calls in one turn to run them concurrently. Sub-agents cannot themselves call dispatch_agent (no recursion).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description:
+            "Self-contained instructions for the sub-agent. Treat it like a brief to a smart colleague who has none of this conversation's context — describe the goal, constraints, and what \"done\" looks like. The sub-agent's reply becomes this tool's result.",
+        },
+        system_prompt: {
+          type: "string",
+          description:
+            "Optional extra system prompt. Appended after the default sub-agent prompt — use it to scope the persona (e.g. 'You are a code reviewer focused on security') or impose constraints (e.g. 'Only inspect files under src/auth').",
+        },
+        allowed_tools: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional whitelist of tool names the sub-agent may call. Names are matched against the parent's tools (e.g. read_file, grep_search). Omit to grant every tool the parent has access to (minus dispatch_agent itself, which is always filtered to prevent recursion).",
+        },
+      },
+      required: ["task"],
     },
   },
   {

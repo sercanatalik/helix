@@ -363,6 +363,17 @@ export async function runBuiltinTool(
         });
         return { result: formatWebFetchResult(r), isError: false };
       }
+      case "dispatch_agent":
+        // Sub-agent dispatch needs the parent's LLM client and tool set,
+        // neither of which the (name, args)-only dispatcher has access to.
+        // `useChat` intercepts the call inside its tool fan-out; reaching
+        // this branch means the interceptor missed the call — surface an
+        // error rather than silently returning success with nothing.
+        return {
+          result:
+            "dispatch_agent must be intercepted by the parent agent loop and was not — this indicates an internal wiring bug.",
+          isError: true,
+        };
       default:
         return {
           result: `Unknown built-in tool: ${name}`,

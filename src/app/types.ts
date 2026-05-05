@@ -159,6 +159,12 @@ export interface ToolCallRecord {
    * correctly when migrated. */
   readonly isError: boolean;
   readonly durationMs?: number;
+  /** When this call is a sub-agent dispatch (`dispatch_agent`), the
+   * sub-agent's own tool calls in execution order. Patched live as the
+   * sub-agent streams so the user can watch the nested run unfold.
+   * Undefined for ordinary tool calls; never set on the nested records
+   * themselves (depth-1 only). */
+  readonly nestedCalls?: readonly ToolCallRecord[];
 }
 
 export interface TranscriptMessage {

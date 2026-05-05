@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BUILTIN_SERVER_ID, runBuiltinTool } from "../lib/builtin-tools";
+import { DISPATCH_AGENT_TOOL_NAME } from "../lib/builtin-tools/defs";
+import { runSubAgent } from "../lib/agent/sub-agent";
 import { buildExtraBody, createClient } from "../lib/llm/client";
 import { isReasoningModel } from "../lib/llm/model-traits";
 import type {
@@ -432,9 +434,11 @@ export function useChat(options: UseChatOptions): UseChatResult {
       // stay in the visible transcript but are dropped from the model-side
       // stack so the user can prune long sessions without losing scrollback.
       const apiMessages: ChatMessage[] = [];
-      const { tools, resolve: resolveTool } = buildToolPayload(
-        extras?.mcpTools ?? [],
-      );
+      // Hold the original (unaliased) bindings list so the sub-agent
+      // dispatch helper below can re-derive a filtered tool payload for
+      // a sub-agent without re-plumbing through the composer.
+      const bindings = extras?.mcpTools ?? [];
+      const { tools, resolve: resolveTool } = buildToolPayload(bindings);
       // When the model gets tools this turn, prepend a brief usage policy.
       // Lands first so user-supplied systemContext can override specifics.
       if (tools.length > 0) {
@@ -503,6 +507,120 @@ export function useChat(options: UseChatOptions): UseChatResult {
         const tokenLimit = reasoning
           ? DEFAULT_REASONING_MAX_TOKENS
           : DEFAULT_MAX_TOKENS;
+
+        // Cached extra-body for sub-agent dispatch (provider extras +
+        // body-mode auth). Hoisted out of the helper so we don't rebuild
+        // it on every dispatch_agent call.
+        const extraBody = buildExtraBody(provider);
+
+        // Run a sub-agent for one `dispatch_agent` tool call. The sub-
+        // agent's tool list is the parent's bindings minus dispatch_agent
+        // itself (depth-1; no recursion) and, when supplied, restricted
+        // to the model-named `allowed_tools`. Returns the same
+        // `{ result, isError }` shape as `runToolCall` so the dispatch
+        // fan-out below stays uniform.
+        const runDispatchAgent = async (
+          rawArgs: string,
+          onProgress?: (records: readonly ToolCallRecord[]) => void,
+        ): Promise<{ result: string; isError: boolean }> => {
+          let parsed: {
+            task?: unknown;
+            system_prompt?: unknown;
+            allowed_tools?: unknown;
+          };
+          try {
+            parsed = rawArgs ? JSON.parse(rawArgs) : {};
+          } catch (parseErr) {
+            return {
+              result: `dispatch_agent: invalid JSON arguments: ${
+                parseErr instanceof Error ? parseErr.message : String(parseErr)
+              }`,
+              isError: true,
+            };
+          }
+          const task =
+            typeof parsed.task === "string" ? parsed.task.trim() : "";
+          if (!task) {
+            return {
+              result: "dispatch_agent: missing required `task` string.",
+              isError: true,
+            };
+          }
+          const systemPrompt =
+            typeof parsed.system_prompt === "string"
+              ? parsed.system_prompt
+              : undefined;
+          const allowed = Array.isArray(parsed.allowed_tools)
+            ? (parsed.allowed_tools.filter(
+                (s): s is string => typeof s === "string" && s.length > 0,
+              ) as string[])
+            : null;
+
+          // Filter the parent's bindings: drop `dispatch_agent` (no
+          // recursion) and, when an allow-list was supplied, intersect
+          // by binding.toolName so the model can scope by the names it
+          // sees in tool descriptions, not the aliased model-facing ids.
+          const subBindings = bindings.filter((b) => {
+            if (
+              b.serverId === BUILTIN_SERVER_ID &&
+              b.toolName === DISPATCH_AGENT_TOOL_NAME
+            ) {
+              return false;
+            }
+            if (allowed && !allowed.includes(b.toolName)) return false;
+            return true;
+          });
+          if (subBindings.length === 0) {
+            return {
+              result:
+                "dispatch_agent: no tools available to the sub-agent. Either widen `allowed_tools` or enable more tools in the parent.",
+              isError: true,
+            };
+          }
+          const { tools: subTools, resolve: subResolve } =
+            buildToolPayload(subBindings);
+
+          try {
+            const r = await runSubAgent({
+              client,
+              model: chosenModel,
+              tokenLimitField,
+              tokenLimit,
+              extraBody,
+              tools: subTools,
+              resolveTool: subResolve,
+              task,
+              systemPrompt,
+              signal: ac.signal,
+              onProgress,
+            });
+            const text = r.finalContent.trim();
+            if (r.aborted) {
+              return {
+                result: text || "(sub-agent stopped before producing an answer)",
+                isError: false,
+              };
+            }
+            if (!text) {
+              return {
+                result:
+                  "(sub-agent finished without returning any text — try a more specific task or check that the allowed tools can actually answer it)",
+                isError: true,
+              };
+            }
+            const note = r.budgetExhausted
+              ? "\n\n[note] Sub-agent hit its tool-call budget — the answer above is a synthesis from partial evidence."
+              : "";
+            return { result: `${text}${note}`, isError: false };
+          } catch (err) {
+            return {
+              result: `Sub-agent failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+              isError: true,
+            };
+          }
+        };
 
         // Signatures of the previous round's tool calls. We append a
         // hint to any result whose `(name, args)` matches a call from
@@ -665,12 +783,28 @@ export function useChat(options: UseChatOptions): UseChatResult {
             const settled = await Promise.all(
               dispatched.map(async ({ tc, callId }) => {
                 const binding = resolveTool(tc.name);
+                const isDispatchAgent =
+                  binding?.serverId === BUILTIN_SERVER_ID &&
+                  binding.toolName === DISPATCH_AGENT_TOOL_NAME;
                 const startedAt = performance.now();
-                const { result: rawResult, isError } = await runToolCall(
-                  binding,
-                  tc.name,
-                  tc.arguments,
-                );
+                const { result: rawResult, isError } = isDispatchAgent
+                  ? await runDispatchAgent(tc.arguments, (nested) => {
+                      // Patch the parent dispatch_agent record with the
+                      // sub-agent's live tool-call snapshot so the
+                      // transcript can render the nested run as it
+                      // happens. We mutate the record at its known
+                      // index — Promise.all's parallel map siblings
+                      // touch their own indices, so there's no race.
+                      const idx = recordIndex.get(callId);
+                      if (idx !== undefined && callRecords[idx]) {
+                        callRecords[idx] = {
+                          ...callRecords[idx]!,
+                          nestedCalls: nested,
+                        };
+                        patchCallRecords();
+                      }
+                    })
+                  : await runToolCall(binding, tc.name, tc.arguments);
                 // Build the version the model will see: cap oversize,
                 // append a recovery hint on errors, flag exact repeats.
                 let modelResult = rawResult;

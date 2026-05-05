@@ -553,6 +553,26 @@ const ToolRow = memo(function ToolRow({ call }: { readonly call: ToolCallRecord 
 
   const capsuleStatus: "ok" | "run" | "err" =
     status === "running" ? "run" : status === "error" ? "err" : "ok";
+
+  // Sub-agent dispatch gets its own header and body — task instead of
+  // raw JSON args, an "Agent" badge so the user can tell this isn't a
+  // plain tool call, and (when expanded) the sub-agent's own tool calls
+  // rendered as nested ToolRows.
+  if (call.toolName === "dispatch_agent") {
+    return <AgentRow call={call} status={status} capsuleStatus={capsuleStatus} />;
+  }
+
+  return <PlainToolRow call={call} status={status} capsuleStatus={capsuleStatus} />;
+});
+
+function PlainToolRow({
+  call,
+  capsuleStatus,
+}: {
+  readonly call: ToolCallRecord;
+  readonly status: ToolCallStatus;
+  readonly capsuleStatus: "ok" | "run" | "err";
+}) {
   const argsPreview = useMemo(
     () => previewLine(call.arguments, 100),
     [call.arguments],
@@ -595,7 +615,126 @@ const ToolRow = memo(function ToolRow({ call }: { readonly call: ToolCallRecord 
       ) : null}
     </div>
   );
-});
+}
+
+function AgentRow({
+  call,
+  capsuleStatus,
+}: {
+  readonly call: ToolCallRecord;
+  readonly status: ToolCallStatus;
+  readonly capsuleStatus: "ok" | "run" | "err";
+}) {
+  // Pull the task out of the dispatch_agent call's arguments so the
+  // user sees what the sub-agent was asked to do, not raw JSON. Falls
+  // back to a placeholder when the args were malformed (rare — useChat
+  // rejects bad args before issuing the call).
+  const { task, allowedTools } = useMemo(() => {
+    if (!call.arguments) return { task: null, allowedTools: null };
+    try {
+      const parsed = JSON.parse(call.arguments) as {
+        task?: unknown;
+        allowed_tools?: unknown;
+      };
+      const t =
+        typeof parsed.task === "string" && parsed.task.trim().length > 0
+          ? parsed.task.trim()
+          : null;
+      const a = Array.isArray(parsed.allowed_tools)
+        ? (parsed.allowed_tools.filter(
+            (s): s is string => typeof s === "string",
+          ) as string[])
+        : null;
+      return { task: t, allowedTools: a };
+    } catch {
+      return { task: null, allowedTools: null };
+    }
+  }, [call.arguments]);
+
+  const nested = call.nestedCalls ?? [];
+  const nestedRunning = nested.some(
+    (n) => (n.status ?? (n.isError ? "error" : "complete")) === "running",
+  );
+
+  // Default open while the sub-agent is running so the user can watch
+  // nested calls land. Once it settles we collapse to keep the
+  // transcript tidy — manual toggles after that always win.
+  const [open, setOpen] = useState<boolean>(capsuleStatus === "run");
+  const wasRunningRef = useRef(capsuleStatus === "run");
+  useEffect(() => {
+    if (wasRunningRef.current && capsuleStatus !== "run") {
+      // Keep open on error so the user can read what went wrong.
+      if (capsuleStatus !== "err") setOpen(false);
+    } else if (!wasRunningRef.current && capsuleStatus === "run") {
+      setOpen(true);
+    }
+    wasRunningRef.current = capsuleStatus === "run";
+  }, [capsuleStatus]);
+
+  return (
+    <div
+      className="tool-cap tool-cap-agent"
+      data-status={capsuleStatus}
+      role="listitem"
+    >
+      <button
+        type="button"
+        className="tool-cap-head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        data-expandable
+      >
+        <span className="tool-cap-dot" aria-hidden />
+        <span className="tool-cap-agent-badge" aria-label="Sub-agent">
+          Agent
+        </span>
+        <span className="tool-cap-agent-task" title={task ?? undefined}>
+          {task ?? "(no task supplied)"}
+        </span>
+        {nested.length > 0 ? (
+          <span className="tool-cap-agent-count" aria-label="nested tool calls">
+            {nestedRunning
+              ? `${nested.length} running`
+              : `${nested.length} ${nested.length === 1 ? "call" : "calls"}`}
+          </span>
+        ) : null}
+        {call.durationMs !== undefined ? (
+          <span className="tool-cap-ms">{formatDuration(call.durationMs)}</span>
+        ) : null}
+        <ChevronIcon open={open} />
+      </button>
+      {open ? (
+        <div className="tool-cap-agent-body">
+          {allowedTools && allowedTools.length > 0 ? (
+            <div className="tool-cap-agent-meta">
+              <span className="tool-cap-agent-meta-label">Allowed tools:</span>
+              <code className="tool-cap-agent-meta-value">
+                {allowedTools.join(", ")}
+              </code>
+            </div>
+          ) : null}
+          {nested.length > 0 ? (
+            <div className="tool-cap-agent-nested" role="list">
+              <div className="tool-cap-agent-nested-label">
+                Sub-agent tool calls
+              </div>
+              {nested.map((nc, idx) => (
+                <ToolRow key={nc.id || idx} call={nc} />
+              ))}
+            </div>
+          ) : capsuleStatus === "run" ? (
+            <div className="tool-cap-agent-empty">Sub-agent thinking…</div>
+          ) : null}
+          {call.result && capsuleStatus !== "run" ? (
+            <pre className="tool-cap-body tool-cap-agent-result">
+              {call.result}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /** Pretty-print a serialized JSON-ish argument blob. Unparseable input
  * returns as-is so non-JSON tool inputs (raw strings, shell args) still

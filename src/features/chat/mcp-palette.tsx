@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { estimateTokens } from "../../lib/llm/context-window";
 import {
   UNTAGGED_TAG,
@@ -209,7 +209,7 @@ export function McpPalette({
                 tag={tag}
                 items={groupItems}
                 enabled={isTagEnabled(tag)}
-                onToggle={() => toggleTag(tag)}
+                onToggle={toggleTag}
                 itemState={itemState}
                 onReadResource={onReadResource}
               />
@@ -419,7 +419,7 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-function PaletteTagGroup({
+const PaletteTagGroup = memo(function PaletteTagGroup({
   tag,
   items,
   enabled,
@@ -430,7 +430,7 @@ function PaletteTagGroup({
   readonly tag: string;
   readonly items: readonly PaletteItem[];
   readonly enabled: boolean;
-  readonly onToggle: () => void;
+  readonly onToggle: (tag: string) => void;
   readonly itemState: PaletteItemState;
   readonly onReadResource: McpPaletteProps["onReadResource"];
 }) {
@@ -451,13 +451,16 @@ function PaletteTagGroup({
     return map;
   }, [items]);
 
+  const handleToggle = useCallback(() => onToggle(tag), [onToggle, tag]);
+  const toggleOpen = useCallback(() => setOpen((v) => !v), []);
+
   return (
     <section className="mcp-palette-group">
       <header className="mcp-palette-group-head">
         <button
           type="button"
           className="mcp-palette-group-toggle"
-          onClick={() => setOpen((v) => !v)}
+          onClick={toggleOpen}
           aria-expanded={open}
           aria-label={open ? "Collapse tag" : "Expand tag"}
         >
@@ -473,7 +476,7 @@ function PaletteTagGroup({
           className="mcp-palette-tag-pill"
           data-active={enabled || undefined}
           data-untagged={isUntagged || undefined}
-          onClick={onToggle}
+          onClick={handleToggle}
           aria-pressed={enabled}
           title={enabled ? `Disable ${label}` : `Enable ${label}`}
         >
@@ -490,7 +493,7 @@ function PaletteTagGroup({
         </span>
         <Switch
           checked={enabled}
-          onChange={onToggle}
+          onChange={handleToggle}
           ariaLabel={`Toggle ${label}`}
         />
       </header>
@@ -531,7 +534,7 @@ function PaletteTagGroup({
       ) : null}
     </section>
   );
-}
+});
 
 function kindLabel(kind: Kind): string {
   if (kind === "tool") return "Tools";
@@ -539,7 +542,7 @@ function kindLabel(kind: Kind): string {
   return "Resources";
 }
 
-function PaletteRowView({
+const PaletteRowView = memo(function PaletteRowView({
   row,
   enabled,
   itemState,
@@ -602,7 +605,7 @@ function PaletteRowView({
       </div>
     </li>
   );
-}
+});
 
 function Switch({
   checked,

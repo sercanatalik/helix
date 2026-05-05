@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { estimateTokens } from "../../lib/llm/context-window";
 import {
   BUILTIN_GROUP_LABEL,
@@ -307,7 +307,7 @@ function BuiltinGroup({
   );
 }
 
-function BuiltinRow({
+const BuiltinRow = memo(function BuiltinRow({
   tool,
   enabled,
 }: {
@@ -330,4 +330,4 @@ function BuiltinRow({
       </div>
     </li>
   );
-}
+});

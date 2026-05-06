@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { BUILTIN_SERVER_ID, runBuiltinTool } from "../lib/builtin-tools";
 import { DISPATCH_AGENT_TOOL_NAME } from "../lib/builtin-tools/defs";
 import { runSubAgent } from "../lib/agent/sub-agent";
@@ -12,19 +13,74 @@ import type {
 import type { ProviderConfig } from "../features/providers";
 import type { ToolCallRecord, TranscriptMessage } from "../app/types";
 
-/** Maximum tool-call iterations before we force a final answer. Set high
- * enough for genuine agentic work (explore → search → read several files →
- * re-search → analyse → fetch → summarise) without letting a runaway model
- * loop indefinitely. When we hit this cap we don't just bail — we issue
- * one final call with `tool_choice: "none"` so the user gets a synthesis
- * from whatever evidence was gathered instead of a blank message. */
-const MAX_TOOL_ITERATIONS = 25;
+/** Live progress payload emitted by the Rust side (`tool_progress.rs`).
+ * Routed by call id to the in-flight tool record so the running row can
+ * show "Connecting…" / "Downloading 240 KB" instead of a generic spinner. */
+const TOOL_PROGRESS_EVENT = "helix://tool-progress";
+interface ToolProgressPayload {
+  readonly id: string;
+  readonly label: string;
+}
+
+/** Module-level registry of "tool-call id → onProgress callback". Lazily
+ * attaches a single `listen()` so we don't open a fresh subscription per
+ * `useChat` mount or per send. The listener fan-outs by id and silently
+ * drops events for ids no one's waiting on. Outside a Tauri runtime
+ * (vite dev), `listen()` rejects — we swallow that and progress just
+ * never fires, matching the rest of the app's degraded-mode behaviour. */
+const toolProgressCallbacks = new Map<string, (label: string) => void>();
+let toolProgressUnlisten: Promise<UnlistenFn> | undefined;
+function ensureToolProgressListener(): void {
+  if (toolProgressUnlisten) return;
+  toolProgressUnlisten = listen<ToolProgressPayload>(
+    TOOL_PROGRESS_EVENT,
+    (event) => {
+      const cb = toolProgressCallbacks.get(event.payload.id);
+      if (cb) cb(event.payload.label);
+    },
+  ).catch((err) => {
+    // Fall back to a no-op unlisten so we don't keep retrying. In a
+    // non-Tauri env this is the expected path.
+    void err;
+    return () => {};
+  });
+}
+function registerToolProgress(
+  callId: string,
+  cb: (label: string) => void,
+): () => void {
+  ensureToolProgressListener();
+  toolProgressCallbacks.set(callId, cb);
+  return () => {
+    toolProgressCallbacks.delete(callId);
+  };
+}
+
+/** Maximum tool-call iterations before we force a final answer. Aligned
+ * with the under-12 guidance in TOOL_USE_SYSTEM_PROMPT so the prompt and
+ * the runtime cap agree. With parallel_tool_calls each iteration can fan
+ * out — that's the intended way to do breadth without burning the budget.
+ * When we hit this cap we don't just bail — we issue one final call with
+ * `tool_choice: "none"` so the user gets a synthesis from whatever
+ * evidence was gathered instead of a blank message. */
+const MAX_TOOL_ITERATIONS = 12;
 
 /** Cap on the size of any single tool result we feed back to the model.
  * Past this, we elide the middle and tell the model to narrow the call.
  * Prevents a runaway grep / web_fetch from blowing the context window. The
  * UI transcript still shows the full untruncated result. */
 const MAX_TOOL_RESULT_BYTES = 60_000;
+
+/** Tool results from rounds older than this many iterations get demoted
+ * to a one-line summary in the API stack so a long agent loop's context
+ * doesn't grow unboundedly. The model can re-issue the call if it needs
+ * the full data — usually it's already extracted what it needed. The
+ * UI transcript keeps every result at full size so the user can audit. */
+const TOOL_AGING_AFTER_ROUNDS = 3;
+/** Don't bother summarising results below this size — the savings don't
+ * justify hiding evidence the model might still glance at. Tuned roughly
+ * to "one screenful of grep output". */
+const TOOL_AGING_MIN_BYTES = 2000;
 
 /** Hidden system message prepended whenever the request carries tools.
  * Nudges the model toward parallelism, deeper drilling, and graceful error
@@ -33,11 +89,13 @@ const MAX_TOOL_RESULT_BYTES = 60_000;
 const TOOL_USE_SYSTEM_PROMPT =
   "You have access to tools. Use them to gather concrete evidence before you answer — do not guess at file contents, search results, or web data.\n\n" +
   "Guidelines:\n" +
-  "- Issue multiple tool calls in parallel when the work is independent (reading several files, running multiple searches). One turn can contain many tool_calls.\n" +
-  "- If a tool returns truncated output, call it again with a wider window (offset, max_bytes, head_limit, larger limit) to read more.\n" +
+  "- Keep the total number of tool calls in your response under 12. Plan upfront which calls you actually need, and prefer one well-scoped call over several narrow ones.\n" +
+  "- Issue independent tool calls in parallel in a single turn (e.g. reading several files, running multiple searches at once) instead of serializing them — parallel batches count as one round and are the cheapest way to stay under the 12-call budget.\n" +
+  "- Before each new tool call, ask whether you already have enough evidence to answer; if yes, stop and write the response.\n" +
+  "- If a tool returns truncated output, call it again with a wider window (offset, max_bytes, head_limit, larger limit) to read more — but widen aggressively so one retry is enough.\n" +
   "- If a tool fails, briefly note the failure and try a different approach — for example use glob_files or grep_search to locate a missing path, or web_search before web_fetch.\n" +
   "- Do not repeat an identical tool call you just made; if you need different data, change the arguments.\n" +
-  "- Stop calling tools and write the final answer once you have enough evidence.";
+  "- For broad or multi-faceted exploration that would otherwise need many calls, use dispatch_agent to delegate it — the sub-agent's calls don't count toward your budget.";
 
 /** Default ceiling on completion tokens for non-reasoning models.
  * Overridable via the provider's extra_params, which merge in last. */
@@ -258,6 +316,7 @@ async function runToolCall(
   binding: McpToolBinding | undefined,
   rawName: string,
   rawArgs: string,
+  progressId?: string,
 ): Promise<{ result: string; isError: boolean }> {
   if (!binding) {
     return {
@@ -282,7 +341,7 @@ async function runToolCall(
     // already returns the same `{ result, isError }` shape so the agent
     // loop doesn't need to know which transport produced the result.
     if (binding.serverId === BUILTIN_SERVER_ID) {
-      return await runBuiltinTool(binding.toolName, args);
+      return await runBuiltinTool(binding.toolName, args, progressId);
     }
     const result = await window.helixApi.callMcpTool(
       binding.serverId,
@@ -415,6 +474,10 @@ export function useChat(options: UseChatOptions): UseChatResult {
         content: "",
         createdAt: nowIso(),
         status: "streaming",
+        // Live until the first delta of any kind arrives — drives the
+        // "Thinking…" indicator across HTTP wait time and the silent
+        // gap between iterations.
+        awaitingResponse: true,
       };
 
       const transcriptHistory = [...messagesRef.current, userMsg];
@@ -475,6 +538,14 @@ export function useChat(options: UseChatOptions): UseChatResult {
         // emit thinking before each tool call as well as before the final
         // response, so we keep one buffer per assistant message.
         let reasoningAcc = "";
+        // Pre-tool-call text the model emitted across earlier iterations.
+        // Each iteration that ends in tool_calls commits its acc here so
+        // "Let me check the file…" preambles survive into the final
+        // message instead of being wiped when the next iteration starts
+        // with an empty buffer. The streaming patch always renders
+        // `committedPreamble + acc` so the user sees a continuous reply
+        // building up across tool rounds.
+        let committedPreamble = "";
         // Vega-Lite blocks salvaged from tool results — appended to the
         // assistant message at the end so charts render whether or not the
         // model echoes the spec.
@@ -522,6 +593,10 @@ export function useChat(options: UseChatOptions): UseChatResult {
         const runDispatchAgent = async (
           rawArgs: string,
           onProgress?: (records: readonly ToolCallRecord[]) => void,
+          onTextProgress?: (snapshot: {
+            readonly content: string;
+            readonly reasoning: string;
+          }) => void,
         ): Promise<{ result: string; isError: boolean }> => {
           let parsed: {
             task?: unknown;
@@ -593,6 +668,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
               systemPrompt,
               signal: ac.signal,
               onProgress,
+              onTextProgress,
             });
             const text = r.finalContent.trim();
             if (r.aborted) {
@@ -627,26 +703,123 @@ export function useChat(options: UseChatOptions): UseChatResult {
         // the immediately-preceding round, nudging the model to vary
         // its arguments instead of looping on the same lookup.
         let lastCallSignatures = new Set<string>();
-        // True iff the model emitted a final text answer (finish_reason
-        // ≠ "tool_calls"). When false after the loop terminates we made
-        // the cap without a synthesis — handled by the fallback below.
-        let normalExit = false;
+
+        // Tracks every role:"tool" message we've appended, with the
+        // iteration that produced it and a one-line summary. On long
+        // loops we walk this list at iteration start and replace
+        // older messages' content with the summary so the request body
+        // doesn't grow unboundedly. Aging is reversible only by the
+        // model re-issuing the same call.
+        interface ToolMessageMeta {
+          readonly apiIndex: number;
+          readonly iteration: number;
+          readonly summary: string;
+          readonly fullBytes: number;
+          aged: boolean;
+        }
+        const toolMessageMetas: ToolMessageMeta[] = [];
+
+        // Build a one-line summary of a tool result for the aging path.
+        // Keeps the head and tail short enough that the model can still
+        // recognise what the call returned without re-running it.
+        const buildToolSummary = (
+          toolName: string,
+          rawArgs: string,
+          fullContent: string,
+          isError: boolean,
+        ): string => {
+          const argDigest =
+            rawArgs && rawArgs.length > 80
+              ? `${rawArgs.slice(0, 77)}…`
+              : rawArgs || "{}";
+          const firstLine =
+            fullContent.split("\n", 1)[0]?.slice(0, 120) ?? "";
+          const status = isError ? " [error]" : "";
+          return (
+            `[aged] ${toolName}(${argDigest}) → ${fullContent.length} bytes${status}` +
+            (firstLine ? `; first line: ${firstLine}` : "") +
+            "\n[note] Full result elided to keep context lean. Re-issue the same call if you need the data again."
+          );
+        };
 
         for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
           if (ac.signal.aborted) break;
+
+          // Age old tool results before sending the next request. We
+          // mutate apiMessages[idx].content in place; meta.aged guards
+          // against repeating the work each iteration.
+          if (iter > 0 && toolMessageMetas.length > 0) {
+            for (const meta of toolMessageMetas) {
+              if (meta.aged) continue;
+              if (iter - meta.iteration <= TOOL_AGING_AFTER_ROUNDS) continue;
+              if (meta.fullBytes < TOOL_AGING_MIN_BYTES) {
+                meta.aged = true;
+                continue;
+              }
+              const target = apiMessages[meta.apiIndex];
+              if (target && target.role === "tool") {
+                apiMessages[meta.apiIndex] = {
+                  role: "tool",
+                  tool_call_id: target.tool_call_id,
+                  content: meta.summary,
+                };
+              }
+              meta.aged = true;
+            }
+          }
+
+          // Re-arm the "Thinking…" indicator for iterations after the
+          // first. The initial stub already has awaitingResponse=true; on
+          // the second+ iteration the previous round's `markFirstDelta`
+          // cleared it, so without this patch the indicator would stay
+          // hidden across the silent inter-iteration gap.
+          if (iter > 0) {
+            patch((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, awaitingResponse: true } : m,
+              ),
+            );
+          }
+
+          // Last allowed iteration when we've already gathered evidence:
+          // pin tool_choice to "none" so the model is forced to synthesise
+          // a final answer in this round. Saves the separate post-loop
+          // round-trip we used to make for the same purpose — and that
+          // one was the slowest, since the context was at its largest by
+          // the time it fired.
+          const forceSynthesis =
+            iter === MAX_TOOL_ITERATIONS - 1 &&
+            tools.length > 0 &&
+            callRecords.length > 0;
+          if (forceSynthesis) {
+            apiMessages.push({
+              role: "system",
+              content:
+                "Tool-call budget reached. Synthesise a final answer from the evidence above. Do not request more tools.",
+            });
+          }
+
           const stream = client.chatStream(
             {
               model: chosenModel,
               messages: apiMessages,
               tools: tools.length > 0 ? tools : undefined,
-              tool_choice: tools.length > 0 ? "auto" : undefined,
+              tool_choice:
+                tools.length > 0
+                  ? forceSynthesis
+                    ? "none"
+                    : "auto"
+                  : undefined,
               // Encourage providers (notably OpenAI) to emit multiple
               // tool_calls in a single turn so we can dispatch them in
               // parallel below. User-supplied extra_params spread last
               // can override (e.g. a buggy proxy that mishandles it).
-              ...(tools.length > 0 ? { parallel_tool_calls: true } : {}),
+              // Skip on the synthesis iteration — no tools will fire.
+              ...(tools.length > 0 && !forceSynthesis
+                ? { parallel_tool_calls: true }
+                : {}),
               [tokenLimitField]: tokenLimit,
-              ...buildExtraBody(provider),
+              ...extraBody,
             },
             { signal: ac.signal },
           );
@@ -654,7 +827,18 @@ export function useChat(options: UseChatOptions): UseChatResult {
           let acc = "";
           const toolCalls: AccumulatedToolCall[] = [];
           let finishReason: string | null = null;
-          let liveStreamed = false;
+          // Cleared on the first delta of any kind — drives the
+          // "Thinking…" indicator while the HTTP request is in flight.
+          let firstDeltaSeen = false;
+          const markFirstDelta = () => {
+            if (firstDeltaSeen) return;
+            firstDeltaSeen = true;
+            patch((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, awaitingResponse: false } : m,
+              ),
+            );
+          };
 
           for await (const chunk of stream) {
             const choice = chunk.choices[0];
@@ -662,6 +846,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
             const delta = choice.delta;
 
             if (delta?.tool_calls) {
+              markFirstDelta();
               for (const tc of delta.tool_calls) {
                 const idx = tc.index ?? 0;
                 let entry = toolCalls[idx];
@@ -683,6 +868,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
             const reasoningDelta =
               delta?.reasoning_content ?? delta?.reasoning;
             if (reasoningDelta) {
+              markFirstDelta();
               reasoningAcc += reasoningDelta;
               const snapshot = reasoningAcc;
               patch((prev) =>
@@ -699,37 +885,33 @@ export function useChat(options: UseChatOptions): UseChatResult {
             }
 
             if (delta?.content) {
+              markFirstDelta();
               acc += delta.content;
-              // Stream content live only when we're confident the iteration
-              // won't end with tool_calls — namely when the model started by
-              // emitting plain text and hasn't requested any tool yet. If a
-              // tool_call delta arrives later, we revert to hidden mode.
-              if (toolCalls.length === 0) {
-                liveStreamed = true;
-                const snapshot = acc;
-                patch((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId ? { ...m, content: snapshot } : m,
-                  ),
-                );
-              } else if (liveStreamed) {
-                // A tool_call started after we'd already streamed text —
-                // hide the prefix; it'll be replaced by the post-tool
-                // response when the loop continues.
-                liveStreamed = false;
-                patch((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId ? { ...m, content: "" } : m,
-                  ),
-                );
-              }
+              // Stream every chunk live, including text that turns out to
+              // precede a tool_call ("Let me check the file…"). When the
+              // iteration ends in tool_calls we commit `acc` into
+              // `committedPreamble` below, so the next iteration's empty
+              // buffer doesn't wipe the user's view of the preamble.
+              const snapshot = committedPreamble + acc;
+              patch((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: snapshot } : m,
+                ),
+              );
             }
 
             if (choice.finish_reason) finishReason = choice.finish_reason;
           }
 
           // Post-stream: branch on whether the model wants more tool calls.
-          if (finishReason === "tool_calls" && toolCalls.length > 0) {
+          // On the synthesis iteration we never dispatch — even if the
+          // model defied tool_choice:"none" and emitted tool_calls, the
+          // budget is already spent.
+          if (
+            !forceSynthesis &&
+            finishReason === "tool_calls" &&
+            toolCalls.length > 0
+          ) {
             // Round-trip the assistant tool_calls + tool results without
             // touching the transcript. The user only sees the final
             // post-tool response.
@@ -766,6 +948,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
                 result: "",
                 status: "running",
                 isError: false,
+                round: iter + 1,
               });
             }
             patchCallRecords();
@@ -787,24 +970,63 @@ export function useChat(options: UseChatOptions): UseChatResult {
                   binding?.serverId === BUILTIN_SERVER_ID &&
                   binding.toolName === DISPATCH_AGENT_TOOL_NAME;
                 const startedAt = performance.now();
-                const { result: rawResult, isError } = isDispatchAgent
-                  ? await runDispatchAgent(tc.arguments, (nested) => {
-                      // Patch the parent dispatch_agent record with the
-                      // sub-agent's live tool-call snapshot so the
-                      // transcript can render the nested run as it
-                      // happens. We mutate the record at its known
-                      // index — Promise.all's parallel map siblings
-                      // touch their own indices, so there's no race.
+                // Subscribe to live progress heartbeats for this specific
+                // call. Tools that don't emit (everything except web_fetch
+                // / read_pdf / read_excel / analyse_data) just leave the
+                // callback dormant — no heartbeat ever fires, no patches.
+                const unregisterProgress = isDispatchAgent
+                  ? undefined
+                  : registerToolProgress(callId, (label) => {
                       const idx = recordIndex.get(callId);
-                      if (idx !== undefined && callRecords[idx]) {
+                      if (idx === undefined || !callRecords[idx]) return;
+                      callRecords[idx] = {
+                        ...callRecords[idx]!,
+                        progress: label,
+                      };
+                      patchCallRecords();
+                    });
+                const { result: rawResult, isError } = isDispatchAgent
+                  ? await runDispatchAgent(
+                      tc.arguments,
+                      (nested) => {
+                        // Patch the parent dispatch_agent record with the
+                        // sub-agent's live tool-call snapshot so the
+                        // transcript can render the nested run as it
+                        // happens. We mutate the record at its known
+                        // index — Promise.all's parallel map siblings
+                        // touch their own indices, so there's no race.
+                        const idx = recordIndex.get(callId);
+                        if (idx !== undefined && callRecords[idx]) {
+                          callRecords[idx] = {
+                            ...callRecords[idx]!,
+                            nestedCalls: nested,
+                          };
+                          patchCallRecords();
+                        }
+                      },
+                      ({ content, reasoning }) => {
+                        // Surface the sub-agent's running text into the
+                        // dispatch row's `result` so the user sees what
+                        // the sub-agent is doing instead of a silent
+                        // spinner. Replaced verbatim once the sub-agent
+                        // settles below.
+                        const idx = recordIndex.get(callId);
+                        if (idx === undefined || !callRecords[idx]) return;
+                        const preview = content.trim()
+                          ? content
+                          : reasoning.trim()
+                            ? `[thinking]\n${reasoning}`
+                            : "";
+                        if (!preview) return;
                         callRecords[idx] = {
                           ...callRecords[idx]!,
-                          nestedCalls: nested,
+                          result: preview,
                         };
                         patchCallRecords();
-                      }
-                    })
-                  : await runToolCall(binding, tc.name, tc.arguments);
+                      },
+                    )
+                  : await runToolCall(binding, tc.name, tc.arguments, callId);
+                unregisterProgress?.();
                 // Build the version the model will see: cap oversize,
                 // append a recovery hint on errors, flag exact repeats.
                 let modelResult = rawResult;
@@ -833,10 +1055,20 @@ export function useChat(options: UseChatOptions): UseChatResult {
                     status: isError ? "error" : "complete",
                     isError,
                     durationMs,
+                    // Settled rows show the result; the heartbeat label
+                    // is no longer meaningful and would otherwise stick.
+                    progress: undefined,
                   };
                   patchCallRecords();
                 }
-                return { callId, rawResult, modelResult, isError };
+                return {
+                  callId,
+                  rawResult,
+                  modelResult,
+                  isError,
+                  toolName: tc.name,
+                  toolArgs: tc.arguments || "{}",
+                };
               }),
             );
 
@@ -847,85 +1079,65 @@ export function useChat(options: UseChatOptions): UseChatResult {
                 }
               }
             }
-            for (const { callId, modelResult } of settled) {
+            for (const {
+              callId,
+              modelResult,
+              toolName,
+              toolArgs,
+              isError,
+            } of settled) {
+              const apiIndex = apiMessages.length;
               apiMessages.push({
                 role: "tool",
                 tool_call_id: callId,
                 content: modelResult,
               });
+              // Record the meta so a later iteration can swap this
+              // entry's content for the one-line summary if it ages.
+              toolMessageMetas.push({
+                apiIndex,
+                iteration: iter,
+                fullBytes: modelResult.length,
+                summary: buildToolSummary(
+                  toolName,
+                  toolArgs,
+                  modelResult,
+                  isError,
+                ),
+                aged: false,
+              });
+            }
+            // Commit any text the model emitted before its tool calls so
+            // the live transcript keeps showing it on subsequent
+            // iterations and it survives into the final message.
+            if (acc.trim().length > 0) {
+              committedPreamble += acc.endsWith("\n") ? acc : `${acc}\n\n`;
             }
             lastCallSignatures = thisRoundSignatures;
             // Loop back for the next iteration.
             continue;
           }
 
-          // Terminal: this iteration's text is the final response.
-          finalContent = acc;
-          normalExit = true;
+          // Terminal: this iteration's text is the final response. Prepend
+          // any preamble accumulated from earlier tool-call iterations so
+          // the user reads the model's full reasoning, not just the
+          // closing summary.
+          finalContent = committedPreamble + acc;
           break;
         }
 
-        // Budget exhausted without a textual answer: do one more call
-        // with `tool_choice: "none"` so the model is forced to summarise
-        // from the evidence we already gathered. Without this, hitting
-        // the iteration cap left the assistant message blank.
-        if (
-          !normalExit &&
-          !ac.signal.aborted &&
-          callRecords.length > 0 &&
-          tools.length > 0
-        ) {
-          apiMessages.push({
-            role: "system",
-            content:
-              "Tool-call budget reached. Synthesise a final answer from the evidence above. Do not request more tools.",
-          });
-          const stream = client.chatStream(
-            {
-              model: chosenModel,
-              messages: apiMessages,
-              tools,
-              tool_choice: "none",
-              [tokenLimitField]: tokenLimit,
-              ...buildExtraBody(provider),
-            },
-            { signal: ac.signal },
-          );
-          let acc = "";
-          for await (const chunk of stream) {
-            const choice = chunk.choices[0];
-            if (!choice) continue;
-            const delta = choice.delta;
-            const reasoningDelta =
-              delta?.reasoning_content ?? delta?.reasoning;
-            if (reasoningDelta) {
-              reasoningAcc += reasoningDelta;
-              const snapshot = reasoningAcc;
-              patch((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        reasoning: snapshot,
-                        reasoningStatus: "streaming",
-                      }
-                    : m,
-                ),
-              );
-            }
-            if (delta?.content) {
-              acc += delta.content;
-              const snapshot = acc;
-              patch((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: snapshot } : m,
-                ),
-              );
-            }
+        // Safety net: the in-loop `forceSynthesis` should always populate
+        // finalContent on the last iteration, but if a misbehaving model
+        // defied tool_choice:"none" and emitted nothing, fall back to the
+        // preamble we already showed the user — or, failing that, a
+        // plain "stopped" placeholder so the bubble isn't blank.
+        if (!ac.signal.aborted && !finalContent.trim()) {
+          if (committedPreamble.trim()) {
+            finalContent = committedPreamble.trimEnd();
+          } else if (callRecords.length > 0) {
+            finalContent =
+              "_(stopped — tool-call budget exhausted with no synthesis from the model)_";
           }
-          finalContent =
-            acc ||
-            "_(stopped — tool-call budget exhausted with no synthesis from the model)_";
         }
 
         // Append any vega-lite blocks we lifted out of tool results that
@@ -950,6 +1162,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
                   ...m,
                   content: finalContent,
                   status: "complete",
+                  awaitingResponse: false,
                   toolCalls:
                     callRecords.length > 0
                       ? callRecords.map((r) => ({ ...r }))
@@ -974,6 +1187,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
                 ? {
                     ...m,
                     status: "complete",
+                    awaitingResponse: false,
                     content: m.content || "_(stopped)_",
                     reasoningStatus: m.reasoning ? "complete" : undefined,
                     // Mark any still-running tool calls as errored so the
@@ -1001,6 +1215,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
                 ? {
                     ...m,
                     status: "error",
+                    awaitingResponse: false,
                     content: m.content || `**Error:** ${detail}`,
                     reasoningStatus: m.reasoning ? "complete" : undefined,
                     toolCalls: m.toolCalls?.map((c) =>

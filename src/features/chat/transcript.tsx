@@ -97,16 +97,18 @@ function MessageViewImpl({ message, stale = false }: MessageViewProps) {
   const reasoningStreaming =
     streaming && message.reasoningStatus !== "complete";
   // Show the "Churning…▎" line whenever the assistant is working but the
-  // user can't otherwise tell — i.e. no live text yet AND reasoning isn't
-  // animating its own cursor. Tool calls in flight count as "working with
-  // nothing to type yet", so we keep the cursor visible across them; once
-  // post-tool content starts streaming, the typed text itself is the live
-  // edge and the status line steps out of the way.
+  // user can't otherwise tell — either we're waiting for the model's
+  // first delta of a fresh iteration (`awaitingResponse`), or there's
+  // simply nothing to render yet AND reasoning isn't animating its own
+  // cursor. The `awaitingResponse` arm matters once preamble text from
+  // earlier iterations is on screen: without it, the status line would
+  // vanish during the silent gap between a finished tool round and the
+  // model's next reply.
   const showStatusLine =
     isAssistant &&
     streaming &&
     !reasoningStreaming &&
-    !message.content;
+    (message.awaitingResponse || !message.content);
   const verb = useRotatingVerb(isAssistant && streaming);
 
   return (
@@ -358,25 +360,87 @@ function ToolCallGroupList({
     );
   }
 
+  // Tag each group with the round number it belongs to (taken from its
+  // first call). Distinct rounds get a divider between them so the user
+  // can see iteration boundaries when the model fanned out across
+  // multiple turns. Single-round runs (the common case) skip dividers.
+  const distinctRounds = new Set<number>();
+  for (const group of groups) {
+    const round = group.calls[0]?.round;
+    if (typeof round === "number") distinctRounds.add(round);
+  }
+  const showRoundDividers = distinctRounds.size >= 2;
+
   return (
     <div className="tool-block" role="list">
       {groups.map((group, idx) => {
+        const round = group.calls[0]?.round;
+        const prevRound = idx > 0 ? groups[idx - 1]?.calls[0]?.round : undefined;
+        const showDivider =
+          showRoundDividers &&
+          typeof round === "number" &&
+          round !== prevRound;
+
         // A solo successful call stays inline — wrapping a single ✓ row in
         // a collapsible header would be more chrome than information. Any
         // error or any second call promotes the run to the group treatment.
         const promote = group.calls.length >= 2 || group.retries > 0;
-        if (!promote) {
-          const only = group.calls[0]!;
-          return <ToolRow key={only.id || `${idx}:${only.toolName}`} call={only} />;
-        }
-        return (
+        const groupNode = !promote ? (
+          (() => {
+            const only = group.calls[0]!;
+            return <ToolRow key={only.id || `${idx}:${only.toolName}`} call={only} />;
+          })()
+        ) : (
           <ToolCallGroup
             key={`${group.serverName}:${idx}`}
             group={group}
             streaming={streaming}
           />
         );
+        if (!showDivider) return groupNode;
+        // Sum durations for every call in this round (across all groups
+        // in this round) so the divider doubles as a per-round timing.
+        let roundCalls = 0;
+        let roundMs = 0;
+        for (const g of groups) {
+          if (g.calls[0]?.round !== round) continue;
+          roundCalls += g.calls.length;
+          for (const c of g.calls) {
+            if (typeof c.durationMs === "number") roundMs += c.durationMs;
+          }
+        }
+        return (
+          <Fragment key={`round-${round}-${idx}`}>
+            <RoundDivider
+              round={round!}
+              callCount={roundCalls}
+              totalMs={roundMs}
+            />
+            {groupNode}
+          </Fragment>
+        );
       })}
+    </div>
+  );
+}
+
+function RoundDivider({
+  round,
+  callCount,
+  totalMs,
+}: {
+  readonly round: number;
+  readonly callCount: number;
+  readonly totalMs: number;
+}) {
+  return (
+    <div className="tool-round-divider" role="presentation">
+      <span className="tool-round-divider-line" aria-hidden />
+      <span className="tool-round-divider-label">
+        Round {round} · {callCount} {callCount === 1 ? "call" : "calls"}
+        {totalMs > 0 ? ` · ${formatDuration(totalMs)}` : ""}
+      </span>
+      <span className="tool-round-divider-line" aria-hidden />
     </div>
   );
 }
@@ -605,6 +669,11 @@ function PlainToolRow({
         ) : (
           <span className="tool-cap-args" />
         )}
+        {capsuleStatus === "run" && call.progress ? (
+          <span className="tool-cap-progress" title={call.progress}>
+            {call.progress}
+          </span>
+        ) : null}
         {call.durationMs !== undefined ? (
           <span className="tool-cap-ms">{formatDuration(call.durationMs)}</span>
         ) : null}

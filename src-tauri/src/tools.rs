@@ -17,6 +17,7 @@
 //!   names so the TypeScript bridge in `lib/tauri-api.ts` can declare them
 //!   without intermediate translation.
 
+use crate::tool_progress;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use ignore::WalkBuilder;
 use regex::RegexBuilder;
@@ -26,6 +27,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
+use tauri::AppHandle;
 
 // -- Read ----------------------------------------------------------------
 
@@ -665,7 +667,12 @@ pub struct ReadPdfResult {
 }
 
 #[tauri::command]
-pub fn read_pdf(path: String) -> Result<ReadPdfResult, String> {
+pub fn read_pdf(
+    app: AppHandle,
+    path: String,
+    progress_id: Option<String>,
+) -> Result<ReadPdfResult, String> {
+    let pid = progress_id.as_deref();
     let p = PathBuf::from(&path);
     let meta = fs::metadata(&p).map_err(|e| format!("read_pdf: {path}: {e}"))?;
     if !meta.is_file() {
@@ -677,6 +684,20 @@ pub fn read_pdf(path: String) -> Result<ReadPdfResult, String> {
             "read_pdf: file too large ({size} bytes, max {READ_PDF_MAX_BYTES})"
         ));
     }
+
+    let display = p
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&path)
+        .to_string();
+    tool_progress::emit(
+        &app,
+        pid,
+        format!(
+            "Extracting text from {display} ({})…",
+            tool_progress::format_bytes(size)
+        ),
+    );
 
     // pdf-extract's `extract_text` returns the whole document at once. It
     // can panic on adversarial input; wrap in catch_unwind so a malformed

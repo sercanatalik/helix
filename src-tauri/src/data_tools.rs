@@ -14,13 +14,14 @@
 //! Excel parsing goes through `calamine` (no native deps); the cell stream
 //! is bucketed per column into typed series before handing off to polars.
 
+use crate::tool_progress;
 use calamine::{open_workbook_auto, Data, Reader};
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 /// Cap on resident DataFrames per app session. Above this we evict the
@@ -169,15 +170,24 @@ pub struct ReadExcelResult {
 
 #[tauri::command]
 pub fn read_excel(
+    app: AppHandle,
     path: String,
     sheet: Option<String>,
     has_header: Option<bool>,
+    progress_id: Option<String>,
     store: State<'_, DataFrameStore>,
 ) -> Result<ReadExcelResult, String> {
+    let pid = progress_id.as_deref();
     let pb = PathBuf::from(&path);
     if !pb.exists() {
         return Err(format!("read_excel: file not found: {path}"));
     }
+    let display = pb
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&path)
+        .to_string();
+    tool_progress::emit(&app, pid, format!("Opening workbook {display}…"));
     let mut book =
         open_workbook_auto(&pb).map_err(|e| format!("read_excel: open {path}: {e}"))?;
     let sheet_names: Vec<String> = book.sheet_names().to_vec();
@@ -185,10 +195,17 @@ pub fn read_excel(
         return Err(format!("read_excel: workbook has no sheets: {path}"));
     }
     let target = sheet.unwrap_or_else(|| sheet_names[0].clone());
+    tool_progress::emit(&app, pid, format!("Reading sheet '{target}'…"));
     let range = book
         .worksheet_range(&target)
         .map_err(|e| format!("read_excel: sheet '{target}': {e}"))?;
 
+    let (rows, cols) = (range.height(), range.width());
+    tool_progress::emit(
+        &app,
+        pid,
+        format!("Building DataFrame ({rows} × {cols})…"),
+    );
     let df = range_to_dataframe(&range, has_header.unwrap_or(true))
         .map_err(|e| format!("read_excel: build DataFrame: {e}"))?;
     let handle = new_handle();
@@ -432,14 +449,27 @@ pub struct AnalyseResult {
 
 #[tauri::command]
 pub fn analyse_data(
+    app: AppHandle,
     args: AnalyseArgs,
+    progress_id: Option<String>,
     store: State<'_, DataFrameStore>,
 ) -> Result<AnalyseResult, String> {
+    let pid = progress_id.as_deref();
     let source = args.handle.clone();
     store.touch(&source);
     let snapshot = store
         .with_frame(&source, |df| df.clone())
         .ok_or_else(|| format!("analyse_data: unknown handle: {source}"))?;
+
+    let (rows, cols) = snapshot.shape();
+    tool_progress::emit(
+        &app,
+        pid,
+        format!(
+            "Running {} on {rows} × {cols} frame…",
+            op_kind_label(&args.operation)
+        ),
+    );
 
     let (op_label, derived) = run_op(&snapshot, &args.operation)?;
     let shape = derived.shape();
@@ -466,6 +496,26 @@ pub fn analyse_data(
         columns,
         preview,
     })
+}
+
+/// Verb-only label for the progress heartbeat — `run_op` already returns
+/// the same string but only after the operation finishes, which is too
+/// late for "Running X on …" feedback. Cheap to derive here without
+/// running the op.
+fn op_kind_label(op: &AnalyseOp) -> &'static str {
+    match op {
+        AnalyseOp::Describe => "describe",
+        AnalyseOp::Head { .. } => "head",
+        AnalyseOp::Tail { .. } => "tail",
+        AnalyseOp::Schema => "schema",
+        AnalyseOp::Select { .. } => "select",
+        AnalyseOp::Filter { .. } => "filter",
+        AnalyseOp::Sort { .. } => "sort",
+        AnalyseOp::GroupBy { .. } => "group_by",
+        AnalyseOp::Pivot { .. } => "pivot",
+        AnalyseOp::Unique { .. } => "unique",
+        AnalyseOp::ValueCounts { .. } => "value_counts",
+    }
 }
 
 fn run_op(df: &DataFrame, op: &AnalyseOp) -> Result<(&'static str, DataFrame), String> {

@@ -21,10 +21,12 @@
 //! Errors come back as `Result<_, String>` so the renderer surfaces them
 //! as a tool-call error in the transcript without breaking the agent loop.
 
+use crate::tool_progress;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tauri::AppHandle;
 
 /// Optional proxy supplied per-call by the renderer. Same shape as
 /// `WebSearchProxy` — kept separate so each tool's serde surface is
@@ -79,8 +81,18 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const USER_AGENT: &str =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
 
+/// How often we emit a "downloading…" heartbeat while reading the body
+/// stream. Tight enough to feel live, loose enough that a fast LAN page
+/// doesn't drown the channel in events.
+const PROGRESS_THROTTLE: Duration = Duration::from_millis(150);
+
 #[tauri::command]
-pub async fn web_fetch(args: WebFetchArgs) -> Result<WebFetchResponse, String> {
+pub async fn web_fetch(
+    app: AppHandle,
+    args: WebFetchArgs,
+    progress_id: Option<String>,
+) -> Result<WebFetchResponse, String> {
+    let pid = progress_id.as_deref();
     let url = args.url.trim();
     if url.is_empty() {
         return Err("web_fetch: url is empty".to_string());
@@ -94,9 +106,16 @@ pub async fn web_fetch(args: WebFetchArgs) -> Result<WebFetchResponse, String> {
         .min(HARD_MAX_BYTES)
         .max(MIN_MAX_BYTES);
 
+    let host_label = url
+        .split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or(url);
+    tool_progress::emit(&app, pid, format!("Connecting to {host_label}…"));
+
     let client = build_client(args.proxy.as_ref()).map_err(|e| e.to_string())?;
 
-    let response = client
+    let mut response = client
         .get(url)
         .send()
         .await
@@ -110,19 +129,66 @@ pub async fn web_fetch(args: WebFetchArgs) -> Result<WebFetchResponse, String> {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_lowercase();
+    let total_size = response.content_length();
+
+    let total_label = total_size
+        .map(|n| format!(" / {}", tool_progress::format_bytes(n)))
+        .unwrap_or_default();
+    tool_progress::emit(
+        &app,
+        pid,
+        format!("HTTP {status} · downloading{total_label}…"),
+    );
 
     // Capture the body even on non-2xx so the model can read consent walls,
     // anti-bot pages (Yahoo Finance returns HTTP 500 to plain HTTP clients,
     // for example), or "page moved" notices and pivot. The status is
     // surfaced prominently in the response so the agent loop can react. We
     // still bail on bodies we can't usefully decode — same rule as the
-    // success path.
-    let raw = response
-        .bytes()
-        .await
-        .map_err(|e| format!("web_fetch: read body failed: {e}"))?;
+    // success path. Read in chunks so we can heartbeat the running byte
+    // count back to the renderer instead of silently buffering for seconds.
+    let mut buf: Vec<u8> = Vec::with_capacity(total_size.unwrap_or(0).min(1 << 20) as usize);
+    let mut last_emit = Instant::now();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                buf.extend_from_slice(&chunk);
+                if last_emit.elapsed() >= PROGRESS_THROTTLE {
+                    let label = match total_size {
+                        Some(t) => format!(
+                            "Downloading… {} / {}",
+                            tool_progress::format_bytes(buf.len() as u64),
+                            tool_progress::format_bytes(t),
+                        ),
+                        None => format!(
+                            "Downloading… {}",
+                            tool_progress::format_bytes(buf.len() as u64)
+                        ),
+                    };
+                    tool_progress::emit(&app, pid, label);
+                    last_emit = Instant::now();
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                return Err(format!("web_fetch: read body failed: {e}"));
+            }
+        }
+    }
+    let raw = buf;
 
-    let body_text = match classify(&content_type) {
+    let kind = classify(&content_type);
+    tool_progress::emit(
+        &app,
+        pid,
+        match kind {
+            BodyKind::Html => "Extracting readable text…",
+            BodyKind::Json => "Decoding JSON body…",
+            BodyKind::Text => "Decoding text body…",
+            BodyKind::Unsupported => "Unsupported content type",
+        },
+    );
+    let body_text = match kind {
         BodyKind::Html => extract_html_text(&raw),
         BodyKind::Text | BodyKind::Json => String::from_utf8_lossy(&raw).into_owned(),
         BodyKind::Unsupported => {

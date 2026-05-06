@@ -5,6 +5,7 @@ mod mcp;
 mod mcp_defaults;
 mod notes;
 mod skills;
+mod tool_progress;
 mod tools;
 mod types;
 mod web_fetch;

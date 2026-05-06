@@ -165,6 +165,16 @@ export interface ToolCallRecord {
    * Undefined for ordinary tool calls; never set on the nested records
    * themselves (depth-1 only). */
   readonly nestedCalls?: readonly ToolCallRecord[];
+  /** 1-indexed agent loop round this call belongs to. Used by the
+   * transcript to slot a "Round N" divider between iterations so the
+   * user can see where each tool batch starts. Optional because older
+   * persisted records were written before this field existed. */
+  readonly round?: number;
+  /** Live heartbeat label emitted by the underlying tool while it's
+   * running (e.g. "Connecting to example.com…", "Downloading 240 KB").
+   * Surfaced inline in the running row so long-running tools don't sit
+   * silent. Cleared once the call settles — `result` takes over. */
+  readonly progress?: string;
 }
 
 export interface TranscriptMessage {
@@ -182,6 +192,13 @@ export interface TranscriptMessage {
    * Streamed in alongside `content`; rendered as a collapsible block. */
   readonly reasoning?: string;
   readonly reasoningStatus?: "streaming" | "complete";
+  /** True while the model is between an HTTP round-trip and its first
+   * delta — either at request start, or in the gap between a finished
+   * tool round and the model's next reply. Drives the "Thinking…"
+   * indicator so the user gets feedback during quiet periods even when
+   * a preamble is already visible. Cleared on the first content /
+   * reasoning / tool-call delta of each iteration. */
+  readonly awaitingResponse?: boolean;
 }
 
 export interface SessionRecord {

@@ -1944,6 +1944,45 @@ button.mcp-tool-chip:disabled {
   flex-shrink: 0;
 }
 
+/* ---------- Round divider ----------
+ * Slim "Round N · M calls · Tms" rule between tool groups produced by
+ * different agent-loop iterations. Only rendered when the assistant
+ * message went through ≥2 rounds — single-round runs skip it. */
+.tool-round-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+.tool-round-divider-line {
+  flex: 1 1 0;
+  height: 1px;
+  background: var(--border-subtle);
+}
+.tool-round-divider-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+
+/* ---------- Tool progress label ----------
+ * Live heartbeat from the underlying tool while it's running ("Connecting
+ * to example.com…", "Downloading 240 KB"). Sits inline next to the tool
+ * name so the user sees what the call is actually doing instead of a
+ * generic spinner. Cleared once the call settles. */
+.tool-cap-progress {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 /* ---------- Collapsed tool-call group ---------- */
 /* Promotes a contiguous run of MCP calls (≥2 calls or any retry) into a
  * single summary line so the prose answer wins the visual hierarchy. The

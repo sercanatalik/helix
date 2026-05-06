@@ -88,6 +88,15 @@ export interface RunSubAgentOptions {
    * The parent uses this to keep its UI's nested view (when present)
    * up-to-date. Not load-bearing — the function still works without it. */
   readonly onProgress?: (records: readonly ToolCallRecord[]) => void;
+  /** Optional callback fired (rate-limited) whenever the sub-agent
+   * streams content or reasoning text. The parent uses this to surface
+   * a live preview of what the sub-agent is doing so its dispatch row
+   * doesn't sit silent for the entire run. Snapshot is rAF-coalesced
+   * upstream — emit eagerly here, the parent throttles. */
+  readonly onTextProgress?: (snapshot: {
+    readonly content: string;
+    readonly reasoning: string;
+  }) => void;
 }
 
 export interface RunSubAgentResult {
@@ -104,7 +113,7 @@ export interface RunSubAgentResult {
   readonly aborted: boolean;
 }
 
-const DEFAULT_MAX_ITERATIONS = 15;
+const DEFAULT_MAX_ITERATIONS = 12;
 const DEFAULT_MAX_TOOL_RESULT_BYTES = 40_000;
 
 /** System prompt the parent agent doesn't see. Nudges the sub-agent
@@ -115,6 +124,7 @@ const SUB_AGENT_SYSTEM_PROMPT =
   "Use tools to gather concrete evidence, then return a direct answer to the task. " +
   "Your final reply will be handed back verbatim as the parent's tool result, so:\n" +
   "- Be concise and factual; skip preamble like \"Here is the answer\".\n" +
+  "- Keep your total tool calls under 12. Batch independent calls in parallel in one turn rather than serializing them, and stop as soon as you have enough evidence to answer.\n" +
   "- If you ran tools, summarise what you found — don't dump raw output.\n" +
   "- If the task is impossible with the tools available, say so plainly.";
 
@@ -224,6 +234,16 @@ export async function runSubAgent(
     if (!opts.onProgress) return;
     opts.onProgress(callRecords.map((r) => ({ ...r })));
   };
+  // Cross-iteration accumulators for the live text preview the parent
+  // shows under its dispatch row. Reasoning resets per iteration only
+  // visually (it's a chain-of-thought, not a final answer); content
+  // here is the running sub-agent output, not the eventual finalContent.
+  let liveContent = "";
+  let liveReasoning = "";
+  const emitTextProgress = () => {
+    if (!opts.onTextProgress) return;
+    opts.onTextProgress({ content: liveContent, reasoning: liveReasoning });
+  };
 
   let finalContent = "";
   let budgetExhausted = false;
@@ -270,7 +290,16 @@ export async function runSubAgent(
         }
       }
 
-      if (delta?.content) acc += delta.content;
+      if (delta?.content) {
+        acc += delta.content;
+        liveContent += delta.content;
+        emitTextProgress();
+      }
+      const reasoningDelta = delta?.reasoning_content ?? delta?.reasoning;
+      if (reasoningDelta) {
+        liveReasoning += reasoningDelta;
+        emitTextProgress();
+      }
       if (choice.finish_reason) finishReason = choice.finish_reason;
     }
 

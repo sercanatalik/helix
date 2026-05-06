@@ -80,10 +80,16 @@ function resolveAgainstWorkspace(path: string): string {
 
 /** Run a built-in tool by name. Returns the same `{ result, isError }`
  * shape `useChat` expects from MCP tool calls so the agent loop stays
- * uniform regardless of which transport produced the result. */
+ * uniform regardless of which transport produced the result.
+ *
+ * `progressId` is the LLM tool-call id; when supplied, tools that
+ * support live progress (`web_fetch`, `read_pdf`, `read_excel`,
+ * `analyse_data`) forward it to Rust so the renderer can subscribe to
+ * heartbeat events for that specific call. Other tools ignore it. */
 export async function runBuiltinTool(
   name: string,
   args: Record<string, unknown>,
+  progressId?: string,
 ): Promise<{ result: string; isError: boolean }> {
   try {
     switch (name) {
@@ -151,7 +157,7 @@ export async function runBuiltinTool(
           return { result: "read_pdf: missing `path`", isError: true };
         }
         const resolved = resolveAgainstWorkspace(path);
-        const r = await window.helixApi.readPdf(resolved);
+        const r = await window.helixApi.readPdf(resolved, progressId);
         const header = `PDF: ${r.path} (${r.size} bytes)${r.truncated ? " — truncated" : ""}`;
         return { result: `${header}\n\n${r.text}`, isError: false };
       }
@@ -298,10 +304,14 @@ export async function runBuiltinTool(
           return { result: "read_excel: missing `path`", isError: true };
         }
         const resolved = resolveAgainstWorkspace(path);
-        const r = await window.helixApi.readExcel(resolved, {
-          sheet,
-          hasHeader: typeof has_header === "boolean" ? has_header : undefined,
-        });
+        const r = await window.helixApi.readExcel(
+          resolved,
+          {
+            sheet,
+            hasHeader: typeof has_header === "boolean" ? has_header : undefined,
+          },
+          progressId,
+        );
         return { result: formatDataResult(r), isError: false };
       }
       case "analyse_data": {
@@ -320,7 +330,7 @@ export async function runBuiltinTool(
             isError: true,
           };
         }
-        const r = await window.helixApi.analyseData(handle, op);
+        const r = await window.helixApi.analyseData(handle, op, progressId);
         return { result: formatAnalyseResult(r), isError: false };
       }
       case "web_search": {
@@ -356,11 +366,14 @@ export async function runBuiltinTool(
         // Same proxy snapshot pattern as web_search — read at call time so
         // a Settings change applies to the next fetch without a restart.
         const proxy = uiHandlers.proxyConfig;
-        const r = await window.helixApi.webFetch({
-          url: url.trim(),
-          maxBytes: typeof max_bytes === "number" ? max_bytes : undefined,
-          proxy: proxy && proxy.enabled && proxy.host ? proxy : undefined,
-        });
+        const r = await window.helixApi.webFetch(
+          {
+            url: url.trim(),
+            maxBytes: typeof max_bytes === "number" ? max_bytes : undefined,
+            proxy: proxy && proxy.enabled && proxy.host ? proxy : undefined,
+          },
+          progressId,
+        );
         return { result: formatWebFetchResult(r), isError: false };
       }
       case "dispatch_agent":

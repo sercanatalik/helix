@@ -337,9 +337,11 @@ export const builtinToolsApi = {
   /** Extract plain text from a PDF using the pure-Rust pdf-extract
    * pipeline. Best-effort on scanned / image-only PDFs (returns the
    * embedded text layer only — there's no OCR). Hard-capped at 50 MB
-   * input and 500 KB output. */
-  readPdf: (path: string): Promise<ReadPdfResult> =>
-    invoke<ReadPdfResult>("read_pdf", { path }),
+   * input and 500 KB output. `progressId` is the LLM tool-call id; when
+   * supplied the Rust side emits `helix://tool-progress` events so the
+   * renderer can show a live label while the extractor runs. */
+  readPdf: (path: string, progressId?: string): Promise<ReadPdfResult> =>
+    invoke<ReadPdfResult>("read_pdf", { path, progressId }),
 
   /** Create or overwrite a file. Missing parent directories are created. */
   writeFile: (path: string, content: string): Promise<WriteFileResult> =>
@@ -401,20 +403,27 @@ export const builtinToolsApi = {
   readExcel: (
     path: string,
     options?: ReadExcelOptions,
+    progressId?: string,
   ): Promise<ReadExcelResult> =>
     invoke<ReadExcelResult>("read_excel", {
       path,
       sheet: options?.sheet,
       hasHeader: options?.hasHeader,
+      progressId,
     }),
 
   /** Run a single statistical operation against a DataFrame handle. The
    * operation produces a derived DataFrame (filter/sort/group_by/pivot/
    * select/describe/...) that's stored under a fresh handle so chains
    * stay cheap to express. */
-  analyseData: (handle: string, op: AnalyseOp): Promise<AnalyseResult> =>
+  analyseData: (
+    handle: string,
+    op: AnalyseOp,
+    progressId?: string,
+  ): Promise<AnalyseResult> =>
     invoke<AnalyseResult>("analyse_data", {
       args: { handle, operation: op },
+      progressId,
     }),
 
   /** Search the public web. Goes through DuckDuckGo's HTML endpoint and,
@@ -429,7 +438,12 @@ export const builtinToolsApi = {
    * reduced to plain text (script/style blocks dropped, block tags →
    * newlines, remaining tags stripped); other text/json types pass through
    * verbatim. Routed through the corporate proxy when one is configured —
-   * same per-call snapshot pattern as {@link webSearch}. */
-  webFetch: (args: WebFetchArgs): Promise<WebFetchResponse> =>
-    invoke<WebFetchResponse>("web_fetch", { args }),
+   * same per-call snapshot pattern as {@link webSearch}. `progressId`
+   * lets the renderer subscribe to live byte-count heartbeats during the
+   * download; pass the LLM tool-call id when invoked from the agent loop. */
+  webFetch: (
+    args: WebFetchArgs,
+    progressId?: string,
+  ): Promise<WebFetchResponse> =>
+    invoke<WebFetchResponse>("web_fetch", { args, progressId }),
 };
